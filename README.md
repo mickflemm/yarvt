@@ -1,2 +1,2 @@
 # Yet Another RISC-V tool
-I use this for initializing a RISC-V development environment and playing with it, I hope others find it usefull as well. Just run it without arguments and it'll print out a usage text.
+I use this for initializing a RISC-V development environment and playing with it, I hope others find it usefull as well. Just run it without arguments and it'll print out a usage text. Note that I use Gentoo where this runs out of the box, I don't know what packages are needed for other distros, please let me know and I'll include it on the README (or create a pull request).
