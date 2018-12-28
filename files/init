@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Initialize /dev and mount /proc and /sys
+mount -t devtmpfs none /dev
+mkdir /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t proc -o nodev,noexec,nosuid proc /proc
+mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
+
+# Start mdev
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+/sbin/mdev -s
+
+# Populate the remaining stuff for rootfs
+mkdir -p /var/log
+touch /var/log/wtmp
+mkdir -p /var/run
+touch /var/run/utmp
+mkdir /etc/dropbear
+touch /var/log/messages
+
+# Create the root user with a default password of "riscv"
+# and the root group with an empty password
+echo "root:\$5\$H2cul7fEFgcApal5\$EA0DmjYXIJ8UWS.mnRC3rF4F2UXUpA3KsAhF/.m/eq.:0:0:99999:7:::" > /etc/shadow
+chmod go-rw /etc/shadow
+echo "root:x:0:0:System administrator,,,:/root:/bin/bash" > /etc/passwd
+chmod go-w /etc/passwd
+echo "/bin/bash" > /etc/shells
+echo "root:x:0:" > /etc/group
+echo "root:*::" > /etc/gshadow
+chmod go-rw /etc/gshadow
+
+# Start syslogd
+syslogd
+
+# Initialize loopback interface
+ip link set lo up
+ip addr add 127.0.0.1 dev lo
+ip route add 127.0.0.0/255.0.0.0 dev lo
+
+# Initialize networking and start DHCP and
+# the ssh server if available
+ip link show eth0 | grep eth0 &> /dev/null
+if [[ $? == 0 ]]; then
+        ip link set eth0 up
+        udhcpc -b
+	dropbear -R -b /etc/motd
+	ntpd
+fi
+
+# Print a greeting
+cat /etc/motd
+
+echo -e "\t\tWelcome to RISC-V !"
+echo "$(uname -s -v -r -p -m)"
+echo "You may login remotely through ssh on your"
+echo "host's port 2222 using root/riscv"
+
+# Get console
+exec setsid cttyhack bash -c "while true; do /bin/bash; done"
+
+#exec /bin/bash

@@ -1,0 +1,601 @@
+#!/bin/bash
+
+# Yet Another RISC-V tool
+# Nick Kossifidis (C) <mick@ics.forth.gr>
+# SPDX-License-Identifier: Apache-2.0
+
+SCRIPT=$(readlink -f ${0})
+SCRIPT_PATH=$(dirname ${SCRIPT})
+WORKDIR=${SCRIPT_PATH}/build
+SOURCES=${SCRIPT_PATH}/sources
+TMP_DIR=/tmp/${0}_$$
+NUM_JOBS=$(nproc)
+DEBUG=1
+BBL_WITH_PAYLOAD=0
+: ${CLEAR_SOURCES:=0}
+: ${BASE_ISA:=RV64I}
+BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
+WORKDIR=${WORKDIR}/${BASE_ISA}
+: ${KEEP_LOGS:=0}
+
+
+##################
+# CONSOLE OUTPUT #
+##################
+
+function pr_ann () {
+	echo -e "\e[32m \n--=== ${1} ===--\e[0m"
+}
+
+function pr_inf () {
+	echo -e "\e[36m${1}\e[0m"
+}
+
+function pr_dbg () {
+	if [[ $DEBUG ]]; then
+		echo -e "\e[35m\t${1}\e[0m"
+	fi
+}
+
+function pr_wrn () {
+	echo -e "\e[33m\t${1}\e[0m"
+}
+
+function pr_err () {
+	echo -e "\e[31m${1}\e[0m"
+}
+
+
+###########
+# HELPERS #
+###########
+
+function git_update() {
+	pr_dbg "Updating ${SOURCES_DIR}..."
+	cd ${SOURCES_DIR}
+	git checkout -f ${1} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\Git checkout failed, check out ${LOGFILE}"
+		return -1;
+	fi
+	git pull &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\Git pull failed, check out ${LOGFILE}"
+		return -1;
+	fi
+}
+
+function git_clone() {
+	local BRANCH=""
+	pr_dbg "Cloning ${GITURL} to ${SOURCES_DIR}..."
+	if [[ ${1} != "" ]]; then
+		BRANCH="-b ${1}"
+		pr_dbg "Using branch ${1}..."
+	fi
+	git clone --recursive ${BRANCH} --depth=1 ${GITURL} \
+		  ${SOURCES_DIR} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tGit clone failed, check out ${LOGFILE}"
+		return -1;
+	fi
+
+}
+
+function get_git_sources() {
+	if [[ -d ${SOURCES_DIR} ]]; then
+		if [[ ${CLEAR_SOURCES} == 1 ]]; then
+			pr_dbg "Cleaning up ${SOURCES_DIR}..."
+			rm -rf ${SOURCES_DIR} &>> ${LOGFILE}
+			git_clone ${1}
+		else
+			git_update ${1}
+		fi
+	else
+		git_clone ${1}
+	fi
+}
+
+function usage () {
+	pr_inf "Usage:"
+	pr_inf "\t${0} <command> <arg>"
+	pr_inf "\nCommands:"
+	pr_inf "\thelp/usage: Print this message"
+	pr_inf "\tcleanup: Clean up environment"
+	pr_inf "\tbootstrap: Build toolchains and qemu"
+	pr_inf "\tbuild_toolchain: Build a specific toolchain"
+	pr_wrn "\t<arg>: Toolchain type (newlib, glibc, musl32, musl64)"
+	pr_inf "\tbuild_qemu: Build RISC-V QEMU"
+	pr_inf "\tbuild_bbl: Build the Berkeley Boot Loader"
+	pr_inf "\tbuild_linux: Build a defconfig RISC-V Linux kernel"
+	pr_inf "\tbuild_rootfs: Build a minimal rootfs on initramfs"
+	pr_inf "\tbuild_all: (Re)build bbl + Linux + rootfs"
+	pr_inf "\trun_linux_qemu: Run QEMU with the built bbl/kernel/initramfs"
+	pr_inf "\nUseful variables:"
+	pr_inf "\tBASE_ISA: Can be RV32I/RV64I (default: RV64I)"
+	pr_inf "\tCLEAR_SOURCES: Set to 1 to re-fetch sources from git"
+	pr_inf "\tBBL_WITH_PAYLOAD: Use Linux as BBL's payload (default 0)"
+	pr_inf "\tDEBUG: Enable/disable debug messages (default 1)"
+	pr_inf "\tKEEP_LOGS: Don't delete log directory (default 0)"
+	echo -e "\n"
+	KEEP_LOGS=0
+}
+
+function env_check() {
+	if [[ $# < 1 || $# > 2 ]]; then
+		usage
+		exit -1;
+	fi
+
+	if [[ ${1} == "usage" || ${1} == "help" ]]; then
+		usage
+		exit 0;
+	fi
+
+	# Command filter
+	if [[ "${1}" != "build_toolchain" && "${1}" != "build_qemu" && \
+	      "${1}" != "build_linux" && "${1}" != "build_bbl" && \
+	      "${1}" != "build_rootfs" && "${1}" != "bootstrap" && \
+	      "${1}" != "build_all" && "${1}" != "run_linux_qemu" && \
+	      "${1}" != "cleanup" ]]; then
+		pr_err "Invalid command"
+		usage
+		exit -1;
+	fi
+}
+
+
+##################
+# ROOTFS HELPERS #
+##################
+
+function build_busybox () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/bb.log
+	local SOURCES_DIR=${SOURCES}/busybox
+	local GITURL=git://busybox.net/busybox.git
+	local INSTALL_DIR=${WORKDIR}/rootfs
+	local TC_INSTALL_DIR=${WORKDIR}/../riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	pr_inf "Checking out BusyBox sources..."
+	get_git_sources 1_29_stable
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring BusyBox..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	cat ${SCRIPT_PATH}/files/busybox | \
+	    sed s#"INSTALL_DIR"#${INSTALL_DIR}#g | \
+	    sed s#"TARGET_TUPLE"#${TARGET_TUPLE}#g > .config
+
+	pr_inf "Building BusyBox..."
+	ARCH=riscv make -j${NUM_JOBS} &>> ${LOGFILE}
+	make install &>> ${LOGFILE}
+	if [[ ! -f ${INSTALL_DIR}/bin/busybox ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}"
+		return -1;
+	fi
+
+	cd ${SAVED_PWD}
+}
+
+function build_dropbear () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/dbear.log
+	local SOURCES_DIR=${SOURCES}/dropbear
+	local GITURL=https://github.com/mkj/dropbear.git
+	local INSTALL_DIR=${WORKDIR}/rootfs
+	local TC_INSTALL_DIR=${WORKDIR}/../riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	pr_inf "Checking out Dropbear sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring Dropbear..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	autoreconf -ivf &>> ${LOGFILE}
+	./configure --enable-static --disable-zlib --disable-wtmp \
+		    --prefix=${INSTALL_DIR} \
+		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
+
+	pr_inf "Building Dropbear..."
+	make -j${NUM_JOBS} PROGRAMS="dropbear dbclient scp" MULTI=1 \
+							 &>> ${LOGFILE}
+	if [[ ! -f ${SOURCES_DIR}/dropbearmulti ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}"
+		return -1;
+	fi
+	cp ${SOURCES_DIR}/dropbearmulti ${INSTALL_DIR}/bin/
+	cd ${INSTALL_DIR}/bin
+	ln -s dropbearmulti dropbear
+	ln -s dropbearmulti ssh
+	ln -s dropbearmulti scp
+
+	cd ${SAVED_PWD}
+}
+
+
+############
+# COMMANDS #
+############
+
+function build_toolchain () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/toolchain.log
+	local SOURCES_DIR=${SOURCES}/riscv-toolchains
+	local GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
+	local TC_TYPE="${1}"
+	local INSTALL_DIR=${WORKDIR}/../riscv-${TC_TYPE}-toolchain
+	local TC_MKTARGET=""
+	local TC_OPTS=""
+
+	if [[ ${TC_TYPE} != "newlib" && ${TC_TYPE} != "glibc" &&
+	      ${TC_TYPE} != "musl32" && ${TC_TYPE} != "musl64" ]]; then
+		pr_err "Invalid toolchain type selected, aborting..."
+		return -1;
+	fi
+
+	pr_ann "RISC-V ${TC_TYPE} toolchain"
+
+	pr_inf "Checking out toolchain sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	# Musl doesn't support multilib
+	if [[ ${TC_TYPE} == "newlib" || ${TC_TYPE} == "glibc" ]]; then
+		TC_OPTS="--enable-multilib"
+	fi
+
+	if [[ ${TC_TYPE} == "glibc" ]]; then
+		TC_MKTARGET="linux"
+	else
+		TC_MKTARGET=${TC_TYPE}
+	fi
+
+	# Musl is not included on riscv-gnu-toolchain repository
+	# download it inside for now, until it becomes a submodule
+	# like the rest.
+	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
+		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
+		GITURL=https://github.com/mickflemm/riscv-musl.git
+		get_git_sources riscv-musl-1.1.20
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+		SOURCES_DIR=${SOURCES}/riscv-toolchains
+		if [[ ${TC_TYPE} == "musl32" ]]; then
+			TC_OPTS="--with-arch=rv32gc"
+		fi
+		TC_MKTARGET="musl"
+	fi
+
+	pr_inf "Configuring toolchain sources for ${TC_TYPE}..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	autoreconf -ivf &>> ${LOGFILE}
+	./configure --prefix=${INSTALL_DIR} ${TC_OPTS} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tConfig failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	rm -rf ${INSTALL_DIR} &>> ${LOGFILE}
+
+	pr_inf "Building ${TC_TYPE}-based toolchain..."
+	make -j${NUM_JOBS} ${TC_MKTARGET} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	cd ${SAVED_PWD}
+}
+
+function build_qemu () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/qemu.log
+	local SOURCES_DIR=${SOURCES}/riscv-qemu
+	local GITURL=https://github.com/riscv/riscv-qemu.git
+	local INSTALL_DIR=${WORKDIR}/../riscv-qemu
+
+	pr_ann "RISC-V QEMU"
+
+	pr_inf "Checking out QEMU sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring qemu sources..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	./configure --target-list=riscv64-softmmu,riscv32-softmmu \
+		    --prefix=${INSTALL_DIR} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tConfig failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	pr_inf "Building riscv-32/riscv-64 QEMU..."
+	make -j${NUM_JOBS} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+	make install &>> ${LOGFILE}
+
+	cd ${SAVED_PWD}
+}
+
+function build_linux () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/rvlinux.log
+	local SOURCES_DIR=${SOURCES}/riscv-linux
+	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
+	local GITURL=https://git.kernel.org/${GITPATH}
+	local INSTALL_DIR=${WORKDIR}/riscv-linux/
+	local TC_INSTALL_DIR=${WORKDIR}/../riscv-glibc-toolchain
+	local CC_PREFIX=riscv64-unknown-linux-gnu-
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+
+	pr_ann "RISC-V Linux kernel for ${BASE_ISA}"
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	if [[ -d ${INSTALL_DIR} ]]; then
+		rm -rf ${INSTALL_DIR}
+	fi
+	mkdir -p ${INSTALL_DIR} &>> ${LOGFILE}
+
+	pr_inf "Checking out Linux sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring kernel sources..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+	make defconfig &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tConfig failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	# Switch to 32bit configuration, olddefconfig
+	# should handle dependencies apropriately
+	if [[ ${BASE_ISA} == "RV32I" ]]; then
+		sed -i s#CONFIG_ARCH_RV64I#CONFIG_ARCH_RV32I#g .config
+		ARCH=riscv make olddefconfig &>> ${LOGFILE}
+	fi
+
+	pr_inf "Building Linux kernel..."
+	ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+	make -j${NUM_JOBS} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	pr_inf "Copying kernel image and modules..."
+	cp vmlinux ${INSTALL_DIR}/
+	INSTALL_MOD_PATH=${INSTALL_DIR} ARCH=riscv \
+	make modules_install &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tCopy failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	cd ${SAVED_PWD}
+}
+
+function build_bbl () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/bbl.log
+	local SOURCES_DIR=${SOURCES}/riscv-bbl
+	local GITURL=https://github.com/riscv/riscv-pk.git
+	local BUILD_DIR=${SOURCES_DIR}/build
+	local INSTALL_DIR=${WORKDIR}/riscv-bbl
+	local LINUX_SOURCES_DIR=${SOURCES}/riscv-linux
+	local PAYLOAD=${LINUX_SOURCES_DIR}/vmlinux
+	local BBL_OPTS=""
+	local TC_INSTALL_DIR=${WORKDIR}/../riscv-newlib-toolchain
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+
+	pr_ann "Berkeley Boot Loader for ${BASE_ISA}"
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
+		if [[ ! -f ${LINUX_SOURCES_DIR}/vmlinux ]]; then
+			pr_err "\tLinux kernel not built"
+			return -2;
+		fi
+	fi
+
+	if [[ ${BASE_ISA} == "RV32I" ]]; then
+		BBL_OPTS="--with-arch=rv32imac"
+	fi
+
+	pr_inf "Checking out BBL sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring BBL sources..."
+	if [[ -d ${BUILD_DIR} ]]; then
+		rm -rf ${BUILD_DIR}
+	fi
+	cd ${SOURCES_DIR}
+	mkdir ${BUILD_DIR}  &>> ${LOGFILE}
+	cd ${BUILD_DIR}
+	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
+		../configure \
+			--enable-logo \
+			--host=riscv64-unknown-elf \
+			--with-payload=${PAYLOAD} \
+			${BBL_OPTS} &>> ${LOGFILE}
+	else
+		../configure \
+			--enable-logo \
+			--host=riscv64-unknown-elf \
+			${BBL_OPTS} &>> ${LOGFILE}
+	fi
+	if [[ $? != 0 ]]; then
+		pr_err "\tConfig failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	pr_inf "Building BBL..."
+	make -j${NUM_JOBS} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	if [[ -d ${INSTALL_DIR} ]]; then
+		rm -rf ${INSTALL_DIR}
+	fi
+	mv ${BUILD_DIR} ${INSTALL_DIR}
+
+	cd ${SAVED_PWD}
+}
+
+function build_rootfs () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/rootfs.log
+	local INSTALL_DIR=${WORKDIR}/rootfs
+	local LINUX_INSTALL_DIR=${WORKDIR}/riscv-linux/
+
+	pr_ann "Minimal RootFS for ${BASE_ISA}"
+	if [[ -d ${INSTALL_DIR} ]]; then
+		rm -rf ${INSTALL_DIR}
+	fi
+	mkdir -p ${INSTALL_DIR}/{dev,proc,sys} &>> ${LOGFILE}
+	mkdir -p ${INSTALL_DIR}/{etc,var/run,/lib/firmware} &>> ${LOGFILE}
+
+	pr_inf "Installing kernel modules..."
+	if [[ ! -f ${LINUX_INSTALL_DIR}/vmlinux ]]; then
+		pr_err "Please build kernel first"
+		return -1;
+	fi
+
+	build_busybox
+
+	build_dropbear
+
+	cp -p -r ${LINUX_INSTALL_DIR}/lib ${INSTALL_DIR}/
+
+	pr_inf "Adding files and symlinks..."
+	cd ${INSTALL_DIR}
+	cp -p ${SCRIPT_PATH}/files/init ./sbin/initscript
+	cp -p ${SCRIPT_PATH}/files/inittab ./etc/
+	cp -p ${SCRIPT_PATH}/files/udhcpc_handler.sh ./etc/
+	cp -p ${SCRIPT_PATH}/files/motd ./etc/
+	ln -s ./bin/busybox ./init
+
+	pr_inf "Creating initramfs image..."
+	find . -print0 | cpio --null -ov --format=newc > \
+	     ${TMP_DIR}/initramfs.cpio 2>> ${LOGFILE}
+	cd ${TMP_DIR}
+	xz -e -T0 --check=crc32 --lzma2=dict=32MiB \
+	   initramfs.cpio &>> ${LOGFILE}
+	rm -rf ${INSTALL_DIR}/*
+	mv ${TMP_DIR}/initramfs.cpio.xz ${INSTALL_DIR}/initramfs.img
+
+	cd ${SAVED_PWD}
+}
+
+function bootstrap () {
+	build_toolchain newlib
+	build_toolchain glibc
+	build_toolchain musl32
+	build_toolchain musl64
+	build_qemu
+}
+
+function build_all () {
+	build_linux
+	build_bbl
+	build_rootfs
+}
+
+function cleanup () {
+	pr_inf "Cleaning up..."
+	rm -rf ${SCRIPT_PATH}/build &> /dev/null
+	rm -rf ${SOURCES} &> /dev/null
+}
+
+function run_linux_qemu () {
+	local SAVED_PWD=${PWD}
+	local QEMU_INSTALL_DIR=${WORKDIR}/../riscv-qemu
+	local BBL_INSTALL_DIR=${WORKDIR}/riscv-bbl
+	local LINUX_INSTALL_DIR=${WORKDIR}/riscv-linux/
+	local ROOTFS_INSTALL_DIR=${WORKDIR}/rootfs
+	local QEMU=${QEMU_INSTALL_DIR}/bin/qemu-system-riscv${BASE_ISA_XLEN}
+
+	${QEMU} -nographic -machine virt -smp 2 -m 1G \
+		-netdev user,id=unet,hostfwd=tcp::2222-:22 \
+		-device virtio-net-device,netdev=unet \
+		-net user \
+		-object rng-random,filename=/dev/urandom,id=rng0 \
+		-device virtio-rng-device,rng=rng0 \
+		-bios ${BBL_INSTALL_DIR}/bbl \
+		-kernel ${LINUX_INSTALL_DIR}/vmlinux \
+		-initrd ${ROOTFS_INSTALL_DIR}/initramfs.img \
+		-append "ro"
+	cd ${SAVED_PWD}
+}
+
+
+################
+# SCRIPT START #
+################
+
+mkdir -p ${SOURCES} &> /dev/null
+mkdir -p ${WORKDIR} &> /dev/null
+mkdir -p ${TMP_DIR} &> /dev/null
+
+pr_ann "Yet another RISC-V tool v0.1"
+env_check $@
+
+$@
+
+if [[ ${KEEP_LOGS} == 1 ]];then
+	pr_inf "Checkout logs at ${TMP_DIR}"
+else
+	rm -rf ${TMP_DIR} &> /dev/null
+fi
