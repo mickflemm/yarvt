@@ -540,17 +540,28 @@ function build_rootfs () {
 }
 
 function bootstrap () {
-	build_toolchain newlib
-	build_toolchain glibc
-	build_toolchain musl32
-	build_toolchain musl64
-	build_qemu
+        # if one step fails then "bootstrap" fails
+        if  build_toolchain newlib  &&
+                build_toolchain glibc &&
+                build_toolchain musl32 &&
+                build_toolchain musl64 &&
+                build_qemu;
+        then
+                return 0;
+        fi
+        
+        return -1;
 }
 
 function build_all () {
-	build_linux
-	build_bbl
-	build_rootfs
+	if build_linux &&
+                build_bbl &&
+                build_rootfs;
+        then
+                return 0;
+        fi
+        
+        return -1;
 }
 
 function cleanup () {
@@ -594,7 +605,9 @@ env_check $@
 
 $@
 
-if [[ ${KEEP_LOGS} == 1 ]];then
+# If a command fails then logs are kept even if
+# ${KEEP_LOGS} == 0  in order to identify what went wrong
+if [[ ${KEEP_LOGS} == 1 || $? != 0 ]];then
 	pr_inf "Checkout logs at ${TMP_DIR}"
 else
 	rm -rf ${TMP_DIR} &> /dev/null
