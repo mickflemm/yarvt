@@ -10,14 +10,17 @@ WORKDIR=${SCRIPT_PATH}/build
 SOURCES=${SCRIPT_PATH}/sources
 TMP_DIR=/tmp/${0}_$$
 NUM_JOBS=$(nproc)
-DEBUG=1
-BBL_WITH_PAYLOAD=0
+: ${DEBUG:=1}
+: ${BBL_WITH_PAYLOAD:=0}
 : ${CLEAR_SOURCES:=0}
 : ${BASE_ISA:=RV64I}
 BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 WORKDIR=${WORKDIR}/${BASE_ISA}
-: ${KEEP_LOGS:=0}
-
+if [[ ${DEBUG} == 1 ]]; then
+	${KEEP_LOGS}=0
+else
+	${KEEP_LOGS}=1
+fi
 
 ##################
 # CONSOLE OUTPUT #
@@ -43,6 +46,7 @@ function pr_wrn () {
 
 function pr_err () {
 	echo -e "\e[31m${1}\e[0m"
+	KEEP_LOGS=1
 }
 
 
@@ -115,7 +119,6 @@ function usage () {
 	pr_inf "\tCLEAR_SOURCES: Set to 1 to re-fetch sources from git"
 	pr_inf "\tBBL_WITH_PAYLOAD: Use Linux as BBL's payload (default 0)"
 	pr_inf "\tDEBUG: Enable/disable debug messages (default 1)"
-	pr_inf "\tKEEP_LOGS: Don't delete log directory (default 0)"
 	echo -e "\n"
 	KEEP_LOGS=0
 }
