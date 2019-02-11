@@ -17,9 +17,9 @@ NUM_JOBS=$(nproc)
 BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 WORKDIR=${WORKDIR}/${BASE_ISA}
 if [[ ${DEBUG} == 1 ]]; then
-	${KEEP_LOGS}=0
+	KEEP_LOGS=1
 else
-	${KEEP_LOGS}=1
+	KEEP_LOGS=0
 fi
 
 ##################
@@ -77,7 +77,7 @@ function git_clone() {
 		pr_dbg "Using branch ${1}..."
 	fi
 	git clone --recursive ${BRANCH} --depth=1 ${GITURL} \
-		  ${SOURCES_DIR} &>> ${LOGFILE}
+		${SOURCES_DIR} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tGit clone failed, check out ${LOGFILE}"
 		return -1;
