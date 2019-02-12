@@ -287,8 +287,8 @@ function build_toolchain () {
 	# like the rest.
 	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
 		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
-		GITURL=https://github.com/mickflemm/riscv-musl.git
-		get_git_sources riscv-musl-1.1.20
+		GITURL=https://github.com/riscv/riscv-musl.git
+		get_git_sources staging
 		if [[ $? != 0 ]]; then
 			return $?;
 		fi
