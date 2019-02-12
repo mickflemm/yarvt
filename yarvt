@@ -67,6 +67,11 @@ function git_update() {
 		pr_err "\Git pull failed, check out ${LOGFILE}"
 		return -1;
 	fi
+	git submodule update &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\Git submodules update failed, check out ${LOGFILE}"
+		return -1;
+	fi
 }
 
 function git_clone() {
@@ -77,7 +82,7 @@ function git_clone() {
 		pr_dbg "Using branch ${1}..."
 	fi
 	git clone --recursive ${BRANCH} --depth=1 ${GITURL} \
-		${SOURCES_DIR} &>> ${LOGFILE}
+		-j ${NUM_JOBS} ${SOURCES_DIR} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tGit clone failed, check out ${LOGFILE}"
 		return -1;
