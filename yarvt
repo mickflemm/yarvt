@@ -6,9 +6,10 @@
 
 SCRIPT=$(readlink -f ${0})
 SCRIPT_PATH=$(dirname ${SCRIPT})
+SCRIPT_NAME=$(basename ${0})
 BINDIR=${SCRIPT_PATH}/build
 SOURCES=${SCRIPT_PATH}/sources
-TMP_DIR=/tmp/${0}_$$
+TMP_DIR=/tmp/${SCRIPT_NAME}_$$
 NUM_JOBS=$(nproc)
 : ${DEBUG:=1}
 : ${BBL_WITH_PAYLOAD:=0}
@@ -578,9 +579,19 @@ function bootstrap () {
 	fi
 }
 
+function setup_env () {
+	local TC_NEWLIB_PATH=${BINDIR}/riscv-newlib-toolchain/bin
+	local TC_GLIBC_PATH=${BINDIR}/riscv-glibc-toolchain/bin
+	local TC_MUSL32_PATH=${BINDIR}/riscv-musl32-toolchain/bin
+	local TC_MUSL64_PATH=${BINDIR}/riscv-musl64-toolchain/bin
+	local TC_MUSL_PATHS=${TC_MUSL32_PATH}:${TC_MUSL64_PATH}
+	local ALL_TC_PATHS=${TC_NEWLIB_PATH}:${TC_GLIBC_PATH}:${TC_MUSL_PATHS}
+	export PATH=${PATH}:${ALL_TC_PATHS}
+}
+
 function cleanup () {
 	pr_inf "Cleaning up..."
-	rm -rf ${SCRIPT_PATH}/build &> /dev/null
+	rm -rf ${BINDIR} &> /dev/null
 	if [[ ${CLEAR_SOURCES} == 1 ]]; then
 		rm -rf ${SOURCES} &> /dev/null
 	fi
@@ -589,6 +600,13 @@ function cleanup () {
 ################
 # SCRIPT START #
 ################
+
+# Check if we are being sourced, if so just run setup_env
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+	pr_inf "Setting up RISC-V toolchain paths..."
+	setup_env
+	return 0
+fi
 
 pr_ann "Yet another RISC-V tool v0.1"
 env_check $@
