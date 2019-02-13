@@ -165,6 +165,11 @@ function env_check() {
 			exit -1;
 		fi
 	fi
+
+	if [[ ${BASE_ISA} != "RV32I" && ${BASE_ISA} != "RV64I" ]]; then
+		pr_err "Invalid BASE_ISA parameter"
+		exit -1;
+	fi
 }
 
 
