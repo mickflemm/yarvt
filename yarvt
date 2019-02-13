@@ -4,9 +4,9 @@
 # Nick Kossifidis (C) <mick@ics.forth.gr>
 # SPDX-License-Identifier: Apache-2.0
 
-SCRIPT=$(readlink -f ${0})
-SCRIPT_PATH=$(dirname ${SCRIPT})
-SCRIPT_NAME=$(basename ${0})
+SCRIPT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT=$(readlink -f ${BASH_SOURCE[0]})
+SCRIPT_NAME=$(basename ${SCRIPT})
 BINDIR=${SCRIPT_PATH}/build
 SOURCES=${SCRIPT_PATH}/sources
 TMP_DIR=/tmp/${SCRIPT_NAME}_$$
