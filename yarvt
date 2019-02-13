@@ -6,7 +6,7 @@
 
 SCRIPT=$(readlink -f ${0})
 SCRIPT_PATH=$(dirname ${SCRIPT})
-WORKDIR=${SCRIPT_PATH}/build
+BINDIR=${SCRIPT_PATH}/build
 SOURCES=${SCRIPT_PATH}/sources
 TMP_DIR=/tmp/${0}_$$
 NUM_JOBS=$(nproc)
@@ -15,12 +15,14 @@ NUM_JOBS=$(nproc)
 : ${CLEAR_SOURCES:=0}
 : ${BASE_ISA:=RV64I}
 BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-WORKDIR=${WORKDIR}/${BASE_ISA}
 if [[ ${DEBUG} == 1 ]]; then
 	KEEP_LOGS=1
 else
 	KEEP_LOGS=0
 fi
+WORKDIR=${BINDIR}
+TARGET=""
+TARGET_PATH=""
 
 ##################
 # CONSOLE OUTPUT #
@@ -104,9 +106,19 @@ function get_git_sources() {
 	fi
 }
 
+function list_targets () {
+	pr_inf "\nAvailable targets:"
+	for i in $(ls ${SCRIPT_PATH}/targets | grep -v common); do
+		pr_inf "\t${i}"
+	done
+}
+
 function usage () {
 	pr_inf "Usage:"
 	pr_inf "\t${0} <command> <arg>"
+	pr_inf "\t${0} <target> help"
+	pr_inf "\t${0} <target> bootstrap"
+	pr_inf "\t${0} <target> <command> <arg>"
 	pr_inf "\nCommands:"
 	pr_inf "\thelp/usage: Print this message"
 	pr_inf "\tcleanup: Clean up environment"
@@ -114,22 +126,18 @@ function usage () {
 	pr_inf "\tbuild_toolchain: Build a specific toolchain"
 	pr_wrn "\t<arg>: Toolchain type (newlib, glibc, musl32, musl64)"
 	pr_inf "\tbuild_qemu: Build RISC-V QEMU"
-	pr_inf "\tbuild_bbl: Build the Berkeley Boot Loader"
-	pr_inf "\tbuild_linux: Build a defconfig RISC-V Linux kernel"
-	pr_inf "\tbuild_rootfs: Build a minimal rootfs on initramfs"
-	pr_inf "\tbuild_all: (Re)build bbl + Linux + rootfs"
-	pr_inf "\trun_linux_qemu: Run QEMU with the built bbl/kernel/initramfs"
+	list_targets
 	pr_inf "\nUseful variables:"
 	pr_inf "\tBASE_ISA: Can be RV32I/RV64I (default: RV64I)"
 	pr_inf "\tCLEAR_SOURCES: Set to 1 to re-fetch sources from git"
-	pr_inf "\tBBL_WITH_PAYLOAD: Use Linux as BBL's payload (default 0)"
 	pr_inf "\tDEBUG: Enable/disable debug messages (default 1)"
 	echo -e "\n"
 	KEEP_LOGS=0
 }
 
 function env_check() {
-	if [[ $# < 1 || $# > 2 ]]; then
+
+	if [[ $# < 1 || $# > 3 ]]; then
 		usage
 		exit -1;
 	fi
@@ -141,13 +149,20 @@ function env_check() {
 
 	# Command filter
 	if [[ "${1}" != "build_toolchain" && "${1}" != "build_qemu" && \
-	      "${1}" != "build_linux" && "${1}" != "build_bbl" && \
-	      "${1}" != "build_rootfs" && "${1}" != "bootstrap" && \
-	      "${1}" != "build_all" && "${1}" != "run_linux_qemu" && \
-	      "${1}" != "cleanup" ]]; then
-		pr_err "Invalid command"
-		usage
-		exit -1;
+	      "${1}" != "bootstrap" && "${1}" != "cleanup" ]]; then
+
+		# Check if we got a command for a specific target
+		if [[ -d ${SCRIPT_PATH}/targets/${1} ]]; then
+			TARGET_PATH=${SCRIPT_PATH}/targets/${1}
+			source ${TARGET_PATH}/commands.sh
+			target_env_check $@
+			target_env_prepare $@
+			WORKDIR=${BINDIR}/${TARGET}/${BASE_ISA}
+		else
+			pr_err "Invalid command"
+			usage
+			exit -1;
+		fi
 	fi
 }
 
@@ -162,7 +177,7 @@ function build_busybox () {
 	local SOURCES_DIR=${SOURCES}/busybox
 	local GITURL=git://busybox.net/busybox.git
 	local INSTALL_DIR=${WORKDIR}/rootfs
-	local TC_INSTALL_DIR=${WORKDIR}/../riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
@@ -202,7 +217,7 @@ function build_dropbear () {
 	local SOURCES_DIR=${SOURCES}/dropbear
 	local GITURL=https://github.com/mkj/dropbear.git
 	local INSTALL_DIR=${WORKDIR}/rootfs
-	local TC_INSTALL_DIR=${WORKDIR}/../riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
@@ -243,9 +258,9 @@ function build_dropbear () {
 }
 
 
-############
-# COMMANDS #
-############
+######################
+# BOOTSTRAP COMMANDS #
+######################
 
 function build_toolchain () {
 	local SAVED_PWD=${PWD}
@@ -253,7 +268,7 @@ function build_toolchain () {
 	local SOURCES_DIR=${SOURCES}/riscv-toolchains
 	local GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
 	local TC_TYPE="${1}"
-	local INSTALL_DIR=${WORKDIR}/../riscv-${TC_TYPE}-toolchain
+	local INSTALL_DIR=${BINDIR}/riscv-${TC_TYPE}-toolchain
 	local TC_MKTARGET=""
 	local TC_OPTS=""
 
@@ -327,7 +342,7 @@ function build_qemu () {
 	local LOGFILE=${TMP_DIR}/qemu.log
 	local SOURCES_DIR=${SOURCES}/riscv-qemu
 	local GITURL=https://github.com/riscv/riscv-qemu.git
-	local INSTALL_DIR=${WORKDIR}/../riscv-qemu
+	local INSTALL_DIR=${BINDIR}/riscv-qemu
 
 	pr_ann "RISC-V QEMU"
 
@@ -359,6 +374,10 @@ function build_qemu () {
 	cd ${SAVED_PWD}
 }
 
+###################
+# COMMON COMMANDS #
+###################
+
 function build_linux () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rvlinux.log
@@ -366,11 +385,11 @@ function build_linux () {
 	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
 	local GITURL=https://git.kernel.org/${GITPATH}
 	local INSTALL_DIR=${WORKDIR}/riscv-linux/
-	local TC_INSTALL_DIR=${WORKDIR}/../riscv-glibc-toolchain
+	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
-	pr_ann "RISC-V Linux kernel for ${BASE_ISA}"
+	pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -436,10 +455,10 @@ function build_bbl () {
 	local LINUX_SOURCES_DIR=${SOURCES}/riscv-linux
 	local PAYLOAD=${LINUX_SOURCES_DIR}/vmlinux
 	local BBL_OPTS=""
-	local TC_INSTALL_DIR=${WORKDIR}/../riscv-newlib-toolchain
+	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
-	pr_ann "Berkeley Boot Loader for ${BASE_ISA}"
+	pr_ann "Berkeley Boot Loader for ${TARGET}/${BASE_ISA}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -508,7 +527,7 @@ function build_rootfs () {
 	local INSTALL_DIR=${WORKDIR}/rootfs
 	local LINUX_INSTALL_DIR=${WORKDIR}/riscv-linux/
 
-	pr_ann "Minimal RootFS for ${BASE_ISA}"
+	pr_ann "Minimal RootFS for ${TARGET}/${BASE_ISA}"
 	if [[ -d ${INSTALL_DIR} ]]; then
 		rm -rf ${INSTALL_DIR}
 	fi
@@ -548,57 +567,39 @@ function build_rootfs () {
 }
 
 function bootstrap () {
-	build_toolchain newlib
-	build_toolchain glibc
-	build_toolchain musl32
-	build_toolchain musl64
-	build_qemu
-}
-
-function build_all () {
-	build_linux
-	build_bbl
-	build_rootfs
+	if [[ ${TARGET} != "" ]]; then
+		target_bootstrap
+	else
+		build_toolchain newlib
+		build_toolchain glibc
+		build_toolchain musl32
+		build_toolchain musl64
+		build_qemu
+	fi
 }
 
 function cleanup () {
 	pr_inf "Cleaning up..."
 	rm -rf ${SCRIPT_PATH}/build &> /dev/null
-	rm -rf ${SOURCES} &> /dev/null
+	if [[ ${CLEAR_SOURCES} == 1 ]]; then
+		rm -rf ${SOURCES} &> /dev/null
+	fi
 }
-
-function run_linux_qemu () {
-	local SAVED_PWD=${PWD}
-	local QEMU_INSTALL_DIR=${WORKDIR}/../riscv-qemu
-	local BBL_INSTALL_DIR=${WORKDIR}/riscv-bbl
-	local LINUX_INSTALL_DIR=${WORKDIR}/riscv-linux/
-	local ROOTFS_INSTALL_DIR=${WORKDIR}/rootfs
-	local QEMU=${QEMU_INSTALL_DIR}/bin/qemu-system-riscv${BASE_ISA_XLEN}
-
-	${QEMU} -nographic -machine virt -smp 2 -m 1G \
-		-netdev user,id=unet,hostfwd=tcp::2222-:22 \
-		-device virtio-net-device,netdev=unet \
-		-net user \
-		-object rng-random,filename=/dev/urandom,id=rng0 \
-		-device virtio-rng-device,rng=rng0 \
-		-bios ${BBL_INSTALL_DIR}/bbl \
-		-kernel ${LINUX_INSTALL_DIR}/vmlinux \
-		-initrd ${ROOTFS_INSTALL_DIR}/initramfs.img \
-		-append "ro"
-	cd ${SAVED_PWD}
-}
-
 
 ################
 # SCRIPT START #
 ################
 
+pr_ann "Yet another RISC-V tool v0.1"
+env_check $@
+
 mkdir -p ${SOURCES} &> /dev/null
 mkdir -p ${WORKDIR} &> /dev/null
 mkdir -p ${TMP_DIR} &> /dev/null
 
-pr_ann "Yet another RISC-V tool v0.1"
-env_check $@
+if [[ ${TARGET} !=  "" ]];then
+	shift 1
+fi
 
 $@
 
