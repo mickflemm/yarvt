@@ -12,15 +12,16 @@ SOURCES=${SCRIPT_PATH}/sources
 TMP_DIR=/tmp/${SCRIPT_NAME}_$$
 NUM_JOBS=$(nproc)
 : ${DEBUG:=1}
-: ${BBL_WITH_PAYLOAD:=0}
 : ${CLEAR_SOURCES:=0}
-: ${BASE_ISA:=RV64I}
-BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 if [[ ${DEBUG} == 1 ]]; then
 	KEEP_LOGS=1
 else
 	KEEP_LOGS=0
 fi
+BASE_ISA=RV64I
+BBL_WITH_PAYLOAD=0
+OSBI_WITH_PAYLOAD=0
+OSBI_PLATFORM=""
 WORKDIR=${BINDIR}
 TARGET=""
 TARGET_PATH=""
@@ -123,13 +124,12 @@ function usage () {
 	pr_inf "\nCommands:"
 	pr_inf "\thelp/usage: Print this message"
 	pr_inf "\tcleanup: Clean up environment"
-	pr_inf "\tbootstrap: Build toolchains and qemu"
-	pr_inf "\tbuild_toolchain: Build a specific toolchain"
+	pr_inf "\tbootstrap: (Re)Build toolchains and qemu"
+	pr_inf "\tbuild_toolchain: (Re)Build a specific toolchain"
 	pr_wrn "\t<arg>: Toolchain type (newlib, glibc, musl32, musl64)"
-	pr_inf "\tbuild_qemu: Build RISC-V QEMU"
+	pr_inf "\tbuild_qemu: (Re)Build RISC-V QEMU"
 	list_targets
 	pr_inf "\nUseful variables:"
-	pr_inf "\tBASE_ISA: Can be RV32I/RV64I (default: RV64I)"
 	pr_inf "\tCLEAR_SOURCES: Set to 1 to re-fetch sources from git"
 	pr_inf "\tDEBUG: Enable/disable debug messages (default 1)"
 	echo -e "\n"
@@ -158,7 +158,7 @@ function env_check() {
 			source ${TARGET_PATH}/commands.sh
 			target_env_check $@
 			target_env_prepare $@
-			WORKDIR=${BINDIR}/${TARGET}/${BASE_ISA}
+			WORKDIR=${BINDIR}/${TARGET}
 		else
 			pr_err "Invalid command"
 			usage
@@ -182,7 +182,8 @@ function build_busybox () {
 	local LOGFILE=${TMP_DIR}/bb.log
 	local SOURCES_DIR=${SOURCES}/busybox
 	local GITURL=git://busybox.net/busybox.git
-	local INSTALL_DIR=${WORKDIR}/rootfs
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -222,7 +223,8 @@ function build_dropbear () {
 	local LOGFILE=${TMP_DIR}/dbear.log
 	local SOURCES_DIR=${SOURCES}/dropbear
 	local GITURL=https://github.com/mkj/dropbear.git
-	local INSTALL_DIR=${WORKDIR}/rootfs
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -390,7 +392,7 @@ function build_linux () {
 	local SOURCES_DIR=${SOURCES}/riscv-linux
 	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
 	local GITURL=https://git.kernel.org/${GITPATH}
-	local INSTALL_DIR=${WORKDIR}/riscv-linux/
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
 	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -441,6 +443,8 @@ function build_linux () {
 
 	pr_inf "Copying kernel image and modules..."
 	cp vmlinux ${INSTALL_DIR}/
+	cp arch/riscv/boot/Image ${INSTALL_DIR}/
+	cp arch/riscv/boot/Image.gz ${INSTALL_DIR}/
 	INSTALL_MOD_PATH=${INSTALL_DIR} ARCH=riscv \
 	make modules_install &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
@@ -457,9 +461,9 @@ function build_bbl () {
 	local SOURCES_DIR=${SOURCES}/riscv-bbl
 	local GITURL=https://github.com/riscv/riscv-pk.git
 	local BUILD_DIR=${SOURCES_DIR}/build
-	local INSTALL_DIR=${WORKDIR}/riscv-bbl
-	local LINUX_SOURCES_DIR=${SOURCES}/riscv-linux
-	local PAYLOAD=${LINUX_SOURCES_DIR}/vmlinux
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
+	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local PAYLOAD=${LINUX_INSTALL_DIR}/vmlinux
 	local BBL_OPTS=""
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -472,7 +476,7 @@ function build_bbl () {
 	fi
 
 	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
-		if [[ ! -f ${LINUX_SOURCES_DIR}/vmlinux ]]; then
+		if [[ ! -f ${LINUX_INSTALL_DIR}/vmlinux ]]; then
 			pr_err "\tLinux kernel not built"
 			return -2;
 		fi
@@ -527,11 +531,75 @@ function build_bbl () {
 	cd ${SAVED_PWD}
 }
 
+function build_osbi () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/osbi.log
+	local SOURCES_DIR=${SOURCES}/riscv-opensbi
+	local GITURL=https://github.com/riscv/opensbi.git
+	local BUILD_DIR=${SOURCES_DIR}/build
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
+	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local OSBI_PAYLOAD=""
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
+	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
+	local CC_PREFIX=riscv64-unknown-elf-
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+
+	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	if [[ ${OSBI_PLATFORM} == "" ]]; then
+		pr_err "Platform not specified/supported"
+		return -2;
+	fi
+
+	if [[ ${OSBI_WITH_PAYLOAD} == 1 ]]; then
+		if [[ ! -f ${LINUX_INSTALL_DIR}/Image ]]; then
+			pr_err "\tLinux kernel not built"
+			return -2;
+		fi
+		OSBI_PAYLOAD=${LINUX_INSTALL_DIR}/Image
+	fi
+
+	pr_inf "Checking out OpenSBI sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	cd ${SOURCES_DIR}
+	make distclean &>> ${LOGFILE}
+
+	pr_inf "Building OpenSBI..."
+	CROSS_COMPILE=${CC_PREFIX} PLATFORM_RISCV_XLEN=${BASE_ISA_XLEN} \
+	make PLATFORM=${OSBI_PLATFORM} FW_PAYLOAD_PATH=${OSBI_PAYLOAD} \
+	-j${NUM_JOBS} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}..."
+		return -1;
+	fi
+
+	if [[ -d ${INSTALL_DIR} ]]; then
+		rm -rf ${INSTALL_DIR}
+	fi
+
+	mkdir -p ${INSTALL_DIR}
+
+	mv ${BUILD_DIR}/platform/${OSBI_PLATFORM}/firmware/*.elf ${INSTALL_DIR}
+	mv ${BUILD_DIR}/platform/${OSBI_PLATFORM}/firmware/*.bin ${INSTALL_DIR}
+
+	cd ${SAVED_PWD}
+}
+
 function build_rootfs () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rootfs.log
-	local INSTALL_DIR=${WORKDIR}/rootfs
-	local LINUX_INSTALL_DIR=${WORKDIR}/riscv-linux/
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
 
 	pr_ann "Minimal RootFS for ${TARGET}/${BASE_ISA}"
 	if [[ -d ${INSTALL_DIR} ]]; then
