@@ -59,7 +59,7 @@ function target_bootstrap () {
 	build_linux
 	build_bbl
 	build_rootfs
-#	build_osbi
+	build_osbi
 }
 
 function run_linux () {

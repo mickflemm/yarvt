@@ -108,6 +108,33 @@ function get_git_sources() {
 	fi
 }
 
+function apply_patches () {
+        local IFS=$'\n'
+        local PATCHLOGFILE=${TMP_DIR}/patch.log
+        local PATCHLIST=$(ls ${TARGET_PATH}/patches/${1}*.patch 2> /dev/null)
+
+        for i in ${PATCHLIST}; do
+                pr_dbg "Applying ${i}..."
+                patch -p0 < ${i} &>> ${PATCHLOGFILE}
+                if [[ $? != 0 ]]; then
+                        pr_err "Patching failed, check out ${PATCHLOGFILE}"
+                        exit -3
+                fi
+        done
+
+	PATCHLIST=$(ls ${TARGET_PATH}/patches/${1}*.sh 2> /dev/null)
+        for i in ${PATCHLIST}; do
+                pr_dbg "Applying ${i}..."
+                source ${i} &>> ${PATCHLOGFILE}
+                if [[ $? != 0 ]]; then
+                        pr_err "Patching failed, check out ${PATCHLOGFILE}"
+                        exit -3
+                fi
+        done
+
+	rm ${PATCHLOGFILE} &> /dev/null
+}
+
 function list_targets () {
 	pr_inf "\nAvailable targets:"
 	for i in $(ls ${SCRIPT_PATH}/targets | grep -v common); do
@@ -415,6 +442,9 @@ function build_linux () {
 		return $?;
 	fi
 
+	pr_inf "Preparing kernel sources..."
+	apply_patches "kernel"
+
 	pr_inf "Configuring kernel sources..."
 	cd ${SOURCES_DIR}
 	make clean &>> ${LOGFILE}
@@ -542,7 +572,7 @@ function build_osbi () {
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	local CC_PREFIX=riscv64-unknown-elf-
+	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
