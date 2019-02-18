@@ -4,7 +4,7 @@ function target_usage () {
 	pr_inf "\nTARGET: QEMU RISC-V Virt machine"
 	pr_inf "\nqemu-virt commands:"
 	pr_inf "\thelp/usage: Print this message"
-	pr_inf "\tbootstrap: (Re)Build bbl + Linux + rootfs"
+	pr_inf "\tbootstrap: (Re)Build bbl + osbi + Linux + rootfs"
 	pr_inf "\tbuild_bbl: (Re)Build the Berkeley Boot Loader"
 	pr_inf "\tbuild_osbi: (Re)Build OpenSBI"
 	pr_inf "\tbuild_linux: (Re)Build a defconfig RISC-V Linux kernel"

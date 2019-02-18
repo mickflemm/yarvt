@@ -25,6 +25,8 @@ OSBI_PLATFORM=""
 WORKDIR=${BINDIR}
 TARGET=""
 TARGET_PATH=""
+INITRAMFS_SKIP_IMAGE=0
+KERNEL_EMBED_INITRAMFS=0
 
 ##################
 # CONSOLE OUTPUT #
@@ -66,6 +68,12 @@ function git_update() {
 		pr_err "\Git checkout failed, check out ${LOGFILE}"
 		return -1;
 	fi
+
+	# Clean up untracked files
+	for i in $(git status -u -s | awk '{print $2}'); do
+		rm -f ${i} &>> ${LOGFILE}
+	done
+
 	git pull &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\Git pull failed, check out ${LOGFILE}"
@@ -420,11 +428,16 @@ function build_linux () {
 	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
 	local GITURL=https://git.kernel.org/${GITPATH}
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
 	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
-	pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA}"
+	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
+		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA} with built-in initramfs"
+	else
+		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA}"
+	fi
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -482,6 +495,30 @@ function build_linux () {
 		return -1;
 	fi
 
+	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
+		pr_inf "Building initramfs..."
+		INITRAMFS_SKIP_IMAGE=1
+		build_rootfs
+		pr_inf "Re-building kernel image..."
+		echo "CONFIG_INITRAMFS_SOURCE=\"${ROOTFS_INSTALL_DIR}\"" >> .config
+		echo "CONFIG_INITRAMFS_COMPRESSION_XZ=y" >> .config
+		echo "CONFIG_INITRAMFS_COMPRESSION=\".xz\"" >> .config
+		ARCH=riscv make olddefconfig &>> ${LOGFILE}
+		rm vmlinux &>> ${LOGFILE}
+		rm arch/riscv/boot/Image &>> ${LOGFILE}
+		rm arch/riscv/boot/Image.gz &>> ${LOGFILE}
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+		make -j${NUM_JOBS} &>> ${LOGFILE}
+		if [[ $? != 0 ]]; then
+			pr_err "\tBuild failed, check out ${LOGFILE}..."
+			return -1;
+		fi
+		cp vmlinux ${INSTALL_DIR}/
+		cp arch/riscv/boot/Image ${INSTALL_DIR}/
+		cp arch/riscv/boot/Image.gz ${INSTALL_DIR}/
+		KERNEL_EMBED_INITRAMFS=0
+	fi
+
 	cd ${SAVED_PWD}
 }
 
@@ -522,11 +559,15 @@ function build_bbl () {
 		return $?;
 	fi
 
+	cd ${SOURCES_DIR}
+	pr_inf "Preparing BBL sources..."
+	apply_patches "bbl"
+
 	pr_inf "Configuring BBL sources..."
 	if [[ -d ${BUILD_DIR} ]]; then
 		rm -rf ${BUILD_DIR}
 	fi
-	cd ${SOURCES_DIR}
+
 	mkdir ${BUILD_DIR}  &>> ${LOGFILE}
 	cd ${BUILD_DIR}
 	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
@@ -631,7 +672,11 @@ function build_rootfs () {
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
 	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
 
-	pr_ann "Minimal RootFS for ${TARGET}/${BASE_ISA}"
+	# Don't print the title when called by build_linux
+	if [[ ${KERNEL_EMBED_INITRAMFS} == 0 ]]; then
+		pr_ann "Minimal RootFS for ${TARGET}/${BASE_ISA}"
+	fi
+
 	if [[ -d ${INSTALL_DIR} ]]; then
 		rm -rf ${INSTALL_DIR}
 	fi
@@ -644,11 +689,11 @@ function build_rootfs () {
 		return -1;
 	fi
 
+	cp -p -r ${LINUX_INSTALL_DIR}/lib ${INSTALL_DIR}/
+
 	build_busybox
 
 	build_dropbear
-
-	cp -p -r ${LINUX_INSTALL_DIR}/lib ${INSTALL_DIR}/
 
 	pr_inf "Adding files and symlinks..."
 	cd ${INSTALL_DIR}
@@ -657,6 +702,12 @@ function build_rootfs () {
 	cp -p ${SCRIPT_PATH}/files/udhcpc_handler.sh ./etc/
 	cp -p ${SCRIPT_PATH}/files/motd ./etc/
 	ln -s ./bin/busybox ./init
+
+	if [[ ${INITRAMFS_SKIP_IMAGE} == 1 ]]; then
+		cd ${SAVED_PWD}
+		INITRAMFS_SKIP_IMAGE=0
+		return 0;
+	fi
 
 	pr_inf "Creating initramfs image..."
 	find . -print0 | cpio --null -ov --format=newc > \
