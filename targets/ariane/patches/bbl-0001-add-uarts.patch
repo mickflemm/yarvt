@@ -1,0 +1,382 @@
+--- machine/fdt.c
++++ machine/fdt.c
+@@ -139,6 +139,13 @@ int fdt_string_list_index(const struct fdt_scan_prop *prop, const char *str)
+   return -1;
+ }
+ 
++const uint32_t *fdt_get_value(const uint32_t *value, uint32_t *result)
++{
++  *result = bswap(*value++);
++  return value;
++}
++
++
+ //////////////////////////////////////////// MEMORY SCAN /////////////////////////////////////////
+ 
+ struct mem_scan {
+--- machine/fdt.h
++++ machine/fdt.h
+@@ -55,6 +55,7 @@ uint32_t fdt_size(uintptr_t fdt);
+ const uint32_t *fdt_get_address(const struct fdt_scan_node *node, const uint32_t *base, uint64_t *value);
+ const uint32_t *fdt_get_size(const struct fdt_scan_node *node, const uint32_t *base, uint64_t *value);
+ int fdt_string_list_index(const struct fdt_scan_prop *prop, const char *str); // -1 if not found
++const uint32_t *fdt_get_value(const uint32_t *value, uint32_t *result);
+ 
+ // Setup memory+clint+plic
+ void query_mem(uintptr_t fdt);
+--- machine/machine.mk.in
++++ machine/machine.mk.in
+@@ -14,7 +14,9 @@ machine_hdrs = \
+   mcall.h \
+   mtrap.h \
+   uart.h \
++  uart16750.h \
+   uart16550.h \
++  uart_lite.h \
+   finisher.h \
+   unprivileged_memory.h \
+   vm.h \
+@@ -29,7 +31,9 @@ machine_c_srcs = \
+   fp_emulation.c \
+   fp_ldst.c \
+   uart.c \
++  uart16750.c \
+   uart16550.c \
++  uart_lite.c \
+   finisher.c \
+   misaligned_ldst.c \
+   flush_icache.c \
+--- machine/minit.c
++++ machine/minit.c
+@@ -7,6 +7,8 @@
+ #include "fdt.h"
+ #include "uart.h"
+ #include "uart16550.h"
++#include "uart16750.h"
++#include "uart_lite.h"
+ #include "finisher.h"
+ #include "disabled_hart_mask.h"
+ #include "htif.h"
+@@ -157,6 +159,8 @@ void init_first_hart(uintptr_t hartid, uintptr_t dtb)
+   // Confirm console as early as possible
+   query_uart(dtb);
+   query_uart16550(dtb);
++  query_uart16750(dtb);
++  query_uart_lite(dtb);
+   query_htif(dtb);
+   printm("bbl loader\r\n");
+ 
+--- machine/mtrap.c
++++ machine/mtrap.c
+@@ -8,6 +8,8 @@
+ #include "vm.h"
+ #include "uart.h"
+ #include "uart16550.h"
++#include "uart16750.h"
++#include "uart_lite.h"
+ #include "finisher.h"
+ #include "fdt.h"
+ #include "unprivileged_memory.h"
+@@ -23,10 +25,14 @@ void __attribute__((noreturn)) bad_trap(uintptr_t* regs, uintptr_t dummy, uintpt
+ 
+ static uintptr_t mcall_console_putchar(uint8_t ch)
+ {
+-  if (uart) {
++  if (uart_lite) {
++    uart_lite_putchar(ch);
++  } else if (uart) {
+     uart_putchar(ch);
+   } else if (uart16550) {
+     uart16550_putchar(ch);
++  } else if (uart16750) {
++    uart16750_putchar(ch);
+   } else if (htif) {
+     htif_console_putchar(ch);
+   }
+@@ -65,10 +71,14 @@ static void send_ipi(uintptr_t recipient, int event)
+ 
+ static uintptr_t mcall_console_getchar()
+ {
+-  if (uart) {
++  if (uart_lite) {
++    return uart_lite_getchar();
++  } else if (uart) {
+     return uart_getchar();
+   } else if (uart16550) {
+     return uart16550_getchar();
++  } else if (uart16750) {
++    return uart16750_getchar();
+   } else if (htif) {
+     return htif_console_getchar();
+   } else {
+--- machine/uart16550.c
++++ machine/uart16550.c
+@@ -10,6 +10,7 @@ volatile uint8_t* uart16550;
+ #define UART_REG_LINESTAT  5
+ #define UART_REG_STATUS_RX 0x01
+ #define UART_REG_STATUS_TX 0x20
++#define UART_REG_DLL       0
+ 
+ void uart16550_putchar(uint8_t ch)
+ {
+@@ -28,6 +29,8 @@ struct uart16550_scan
+ {
+   int compat;
+   uint64_t reg;
++  uint32_t freq;
++  uint32_t baud;
+ };
+ 
+ static void uart16550_open(const struct fdt_scan_node *node, void *extra)
+@@ -39,8 +42,13 @@ static void uart16550_open(const struct fdt_scan_node *node, void *extra)
+ static void uart16550_prop(const struct fdt_scan_prop *prop, void *extra)
+ {
+   struct uart16550_scan *scan = (struct uart16550_scan *)extra;
+-  if (!strcmp(prop->name, "compatible") && !strcmp((const char*)prop->value, "ns16550a")) {
++  if (!strcmp(prop->name, "compatible") && !strcmp((const char*)prop->value, "ns16550a")
++      && !strcmp((const char*)prop->value, "ns16550")) {
+     scan->compat = 1;
++  } else if (!strcmp(prop->name, "clock-frequency")) {
++    fdt_get_value(prop->value, &scan->freq);
++  } else if (!strcmp(prop->name, "current-speed")) {
++    fdt_get_value(prop->value, &scan->baud);
+   } else if (!strcmp(prop->name, "reg")) {
+     fdt_get_address(prop->node->parent, prop->value, &scan->reg);
+   }
+@@ -52,11 +60,15 @@ static void uart16550_done(const struct fdt_scan_node *node, void *extra)
+   if (!scan->compat || !scan->reg || uart16550) return;
+ 
+   uart16550 = (void*)(uintptr_t)scan->reg;
++
++  // calculate divisor
++  uint32_t divisor = scan->freq / (scan->baud << 4);
++
+   // http://wiki.osdev.org/Serial_Ports
+   uart16550[1] = 0x00;    // Disable all interrupts
+   uart16550[3] = 0x80;    // Enable DLAB (set baud rate divisor)
+-  uart16550[0] = 0x03;    // Set divisor to 3 (lo byte) 38400 baud
+-  uart16550[1] = 0x00;    //                  (hi byte)
++  uart16550[0] = divisor      & 0xFF;    // divisor (lo byte) 
++  uart16550[1] = (divisor>>8) & 0xFF;    // divisor (hi byte)
+   uart16550[3] = 0x03;    // 8 bits, no parity, one stop bit
+   uart16550[2] = 0xC7;    // Enable FIFO, clear them, with 14-byte threshold
+ }
+@@ -66,6 +78,10 @@ void query_uart16550(uintptr_t fdt)
+   struct fdt_cb cb;
+   struct uart16550_scan scan;
+ 
++  // default
++  scan.freq = 50000000;
++  scan.baud = 115200;
++
+   memset(&cb, 0, sizeof(cb));
+   cb.open = uart16550_open;
+   cb.prop = uart16550_prop;
+--- /dev/null
++++ machine/uart16750.c
+@@ -0,0 +1,91 @@
++// See LICENSE for license details.
++
++#include <string.h>
++#include "uart16750.h"
++#include "fdt.h"
++
++volatile uint32_t* uart16750;
++
++#define UART_REG_QUEUE     0
++#define UART_REG_LINESTAT  5
++#define UART_REG_STATUS_RX 0x01
++#define UART_REG_STATUS_TX 0x20
++#define UART_REG_DLL       0
++
++void uart16750_putchar(uint8_t ch)
++{
++  while ((uart16750[UART_REG_LINESTAT] & UART_REG_STATUS_TX) == 0);
++  uart16750[UART_REG_QUEUE] = ch;
++}
++
++int uart16750_getchar()
++{
++  if (uart16750[UART_REG_LINESTAT] & UART_REG_STATUS_RX)
++    return uart16750[UART_REG_QUEUE];
++  return -1;
++}
++
++struct uart16750_scan
++{
++  int compat;
++  uint64_t reg;
++  uint32_t freq;
++  uint32_t baud;
++};
++
++static void uart16750_open(const struct fdt_scan_node *node, void *extra)
++{
++  struct uart16750_scan *scan = (struct uart16750_scan *)extra;
++  memset(scan, 0, sizeof(*scan));
++}
++
++static void uart16750_prop(const struct fdt_scan_prop *prop, void *extra)
++{
++  struct uart16750_scan *scan = (struct uart16750_scan *)extra;
++  if (!strcmp(prop->name, "compatible") && !strcmp((const char*)prop->value, "ns16750")) {
++    scan->compat = 1;
++  } else if (!strcmp(prop->name, "clock-frequency")) {
++    fdt_get_value(prop->value, &scan->freq);
++  } else if (!strcmp(prop->name, "current-speed")) {
++    fdt_get_value(prop->value, &scan->baud);
++  } else if (!strcmp(prop->name, "reg")) {
++    fdt_get_address(prop->node->parent, prop->value, &scan->reg);
++  }
++}
++
++static void uart16750_done(const struct fdt_scan_node *node, void *extra)
++{
++  struct uart16750_scan *scan = (struct uart16750_scan *)extra;
++  if (!scan->compat || !scan->reg || uart16750) return;
++
++  uart16750 = (void*)(uintptr_t)scan->reg;
++
++  // calculate divisor
++  uint32_t divisor = scan->freq / (scan->baud << 4);
++
++  // http://wiki.osdev.org/Serial_Ports
++  uart16750[1] = 0x00;    // Disable all interrupts
++  uart16750[3] = 0x80;    // Enable DLAB (set baud rate divisor)
++  uart16750[0] = divisor      & 0xFF;    // divisor (lo byte) 
++  uart16750[1] = (divisor>>8) & 0xFF;    // divisor (hi byte)
++  uart16750[3] = 0x03;    // 8 bits, no parity, one stop bit
++  uart16750[2] = 0xC7;    // Enable FIFO, clear them, with 14-byte threshold
++}
++
++void query_uart16750(uintptr_t fdt)
++{
++  struct fdt_cb cb;
++  struct uart16750_scan scan;
++
++  // default
++  scan.freq = 50000000;
++  scan.baud = 115200;
++
++  memset(&cb, 0, sizeof(cb));
++  cb.open = uart16750_open;
++  cb.prop = uart16750_prop;
++  cb.done = uart16750_done;
++  cb.extra = &scan;
++
++  fdt_scan(fdt, &cb);
++}
+--- /dev/null
++++ machine/uart16750.h
+@@ -0,0 +1,14 @@
++// See LICENSE for license details.
++
++#ifndef _RISCV_16750_H
++#define _RISCV_16750_H
++
++#include <stdint.h>
++
++extern volatile uint32_t* uart16750;
++
++void uart16750_putchar(uint8_t ch);
++int uart16750_getchar();
++void query_uart16750(uintptr_t dtb);
++
++#endif
+--- /dev/null
++++ machine/uart_lite.c
+@@ -0,0 +1,67 @@
++// See LICENSE for license details.
++
++#include <string.h>
++#include "uart_lite.h"
++#include "fdt.h"
++
++volatile uint32_t* uart_lite = 0;
++
++void uart_lite_putchar(uint8_t ch)
++{
++  while (uart_lite[UART_LITE_STAT_REG] & (1 << UART_LITE_TX_FULL));
++  uart_lite[UART_LITE_REG_TXFIFO] = ch;
++}
++
++int uart_lite_getchar()
++{
++  if (uart_lite[UART_LITE_STAT_REG] & (1 << UART_LITE_RX_VALID))
++    return uart_lite[UART_LITE_REG_RXFIFO];
++  return -1;
++}
++
++struct uart_lite_scan
++{
++  int compat;
++  uint64_t reg;
++};
++
++static void uart_lite_open(const struct fdt_scan_node *node, void *extra)
++{
++  struct uart_lite_scan *scan = (struct uart_lite_scan *)extra;
++  memset(scan, 0, sizeof(*scan));
++}
++
++static void uart_lite_prop(const struct fdt_scan_prop *prop, void *extra)
++{
++  struct uart_lite_scan *scan = (struct uart_lite_scan *)extra;
++  if (!strcmp(prop->name, "compatible") && !strcmp((const char*)prop->value, "xlnx,axi-uartlite-1.02.a")) {
++    scan->compat = 1;
++  } else if (!strcmp(prop->name, "reg")) {
++    fdt_get_address(prop->node->parent, prop->value, &scan->reg);
++  }
++}
++
++static void uart_lite_done(const struct fdt_scan_node *node, void *extra)
++{
++  struct uart_lite_scan *scan = (struct uart_lite_scan *)extra;
++  if (!scan->compat || !scan->reg || uart_lite) return;
++
++  uart_lite = (void*)(uintptr_t)scan->reg;
++  // https://www.xilinx.com/support/documentation/ip_documentation/axi_uartlite/v2_0/pg142-axi-uartlite.pdf
++  // clear TX and RX FIFOs
++  uart_lite[UART_LITE_CTRL_REG] = 0x3;
++}
++
++void query_uart_lite(uintptr_t fdt)
++{
++  struct fdt_cb cb;
++  struct uart_lite_scan scan;
++
++  memset(&cb, 0, sizeof(cb));
++  cb.open = uart_lite_open;
++  cb.prop = uart_lite_prop;
++  cb.done = uart_lite_done;
++  cb.extra = &scan;
++
++  fdt_scan(fdt, &cb);
++}
+--- /dev/null
++++ machine/uart_lite.h
+@@ -0,0 +1,24 @@
++// See LICENSE for license details.
++
++#ifndef _RISCV_UART_LITE_H
++#define _RISCV_UART_LITE_H
++
++#include <stdint.h>
++
++extern volatile uint32_t* uart_lite;
++
++#define UART_LITE_REG_RXFIFO	0
++#define UART_LITE_REG_TXFIFO    1
++#define UART_LITE_STAT_REG   	2
++#define UART_LITE_CTRL_REG  	3
++
++#define UART_LITE_TX_FULL	 3
++#define UART_LITE_RX_FULL    1
++#define UART_LITE_RX_VALID	 0
++
++
++void uart_lite_putchar(uint8_t ch);
++int uart_lite_getchar();
++void query_uart_lite(uintptr_t dtb);
++
++#endif

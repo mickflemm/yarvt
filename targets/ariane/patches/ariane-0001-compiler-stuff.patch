@@ -1,0 +1,26 @@
+index 65e0416..6701c69 100644
+--- fpga/constraints/genesys-2.xdc
++++ fpga/constraints/genesys-2.xdc
+@@ -95,3 +95,5 @@ set_false_path -from [get_ports { trst_n } ]
+ # constrain clock domain crossing
+ set_false_path -from [get_clocks tck] -to [get_clocks clk_out1]
+ set_max_delay  -from [get_clocks tck] -to [get_clocks clk_out1] 5
++
++set_property BITSTREAM.GENERAL.COMPRESS True [current_design]
+index 920a711..43700d8 100644
+--- fpga/src/ariane_peripherals_xilinx.sv
++++ fpga/src/ariane_peripherals_xilinx.sv
+@@ -9,7 +9,6 @@
+ // specific language governing permissions and limitations under the License.
+ 
+ // Xilinx Peripehrals
+-`default_nettype none
+ 
+ module ariane_peripherals #(
+     parameter int AxiAddrWidth = -1,
+@@ -719,5 +718,3 @@ framing_top eth_rgmii
+         assign s_axi_gpio_wlast = 1'b1;
+     end
+ endmodule
+-
+-`default_nettype wire
