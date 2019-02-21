@@ -19,6 +19,9 @@ touch /var/run/utmp
 mkdir /etc/dropbear
 touch /var/log/messages
 
+# Make sure /dev/console exists
+mknod -m 622 /dev/console c 5 1 &> /dev/null
+
 # Create the root user with a default password of "riscv"
 # and the root group with an empty password
 echo "root:\$5\$H2cul7fEFgcApal5\$EA0DmjYXIJ8UWS.mnRC3rF4F2UXUpA3KsAhF/.m/eq.:0:0:99999:7:::" > /etc/shadow
@@ -38,23 +41,23 @@ ip link set lo up
 ip addr add 127.0.0.1 dev lo
 ip route add 127.0.0.0/255.0.0.0 dev lo
 
+# Print a greeting
+cat /etc/motd > /dev/console
+
+echo -e "\t\tWelcome to RISC-V !" > /dev/console
+echo "$(uname -s -v -r -p -m)" > /dev/console
+
 # Initialize networking and start DHCP and
 # the ssh server if available
 ip link show eth0 | grep eth0 &> /dev/null
 if [[ $? == 0 ]]; then
         ip link set eth0 up
-        udhcpc -b
-	dropbear -R -b /etc/motd
-	ntpd
+        udhcpc -b > /dev/console &
+	dropbear -R -b /etc/motd &
+	ntpd &
+	echo "You may login remotely through ssh over network or" > /dev/console
+	echo "your host's port 2222 (in case of QEMU) using root/riscv" > /dev/console
 fi
-
-# Print a greeting
-cat /etc/motd
-
-echo -e "\t\tWelcome to RISC-V !"
-echo "$(uname -s -v -r -p -m)"
-echo "You may login remotely through ssh on your"
-echo "host's port 2222 using root/riscv"
 
 # Get console
 exec setsid cttyhack bash -c "while true; do /bin/bash; done"

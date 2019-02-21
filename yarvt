@@ -19,6 +19,7 @@ else
 	KEEP_LOGS=0
 fi
 BASE_ISA=RV64I
+ABI=imafdc
 BBL_WITH_PAYLOAD=0
 OSBI_WITH_PAYLOAD=0
 OSBI_PLATFORM=""
@@ -221,7 +222,19 @@ function build_busybox () {
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
+	local EXTRA_CFLAGS=""
+	local MARCH=""
+	local MABI=""
+
+	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
+		MABI=lp64
+	else
+		MABI=ilp32
+	fi
+
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	MARCH=rv${BASE_ISA_XLEN}imac
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -240,7 +253,8 @@ function build_busybox () {
 	make distclean &>> ${LOGFILE}
 	cat ${SCRIPT_PATH}/files/busybox | \
 	    sed s#"INSTALL_DIR"#${INSTALL_DIR}#g | \
-	    sed s#"TARGET_TUPLE"#${TARGET_TUPLE}#g > .config
+	    sed s#"TARGET_TUPLE"#${TARGET_TUPLE}#g | \
+	    sed s#"CONFIG_EXTRA_CFLAGS=\"\""#"CONFIG_EXTRA_CFLAGS=\"${EXTRA_CFLAGS}\""#g > .config
 
 	pr_inf "Building BusyBox..."
 	ARCH=riscv make -j${NUM_JOBS} &>> ${LOGFILE}
@@ -262,7 +276,19 @@ function build_dropbear () {
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
+	local EXTRA_CFLAGS=""
+	local MARCH=""
+	local MABI=""
+
+	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
+		MABI=lp64
+	else
+		MABI=ilp32
+	fi
+
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	MARCH=rv${BASE_ISA_XLEN}imac
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -280,6 +306,7 @@ function build_dropbear () {
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
+	CFLAGS="-O2 ${EXTRA_CFLAGS}" \
 	./configure --enable-static --disable-zlib --disable-wtmp \
 		    --prefix=${INSTALL_DIR} \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
@@ -312,8 +339,11 @@ function build_toolchain () {
 	local GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
 	local TC_TYPE="${1}"
 	local INSTALL_DIR=${BINDIR}/riscv-${TC_TYPE}-toolchain
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_MKTARGET=""
 	local TC_OPTS=""
+	local MARCH=""
+	local MABI=""
 
 	if [[ ${TC_TYPE} != "newlib" && ${TC_TYPE} != "glibc" &&
 	      ${TC_TYPE} != "musl32" && ${TC_TYPE} != "musl64" ]]; then
@@ -332,6 +362,15 @@ function build_toolchain () {
 	# Musl doesn't support multilib
 	if [[ ${TC_TYPE} == "newlib" || ${TC_TYPE} == "glibc" ]]; then
 		TC_OPTS="--enable-multilib"
+	else
+		if [[ ${BASE_ISA_XLEN} == 64 ]]; then
+			MABI=lp64
+		else
+			MABI=ilp32
+		fi
+
+		MARCH=rv${BASE_ISA_XLEN}imac
+		TC_OPTS="--with-arch=${MARCH} --with-abi=${MABI}"
 	fi
 
 	if [[ ${TC_TYPE} == "glibc" ]]; then
@@ -345,15 +384,12 @@ function build_toolchain () {
 	# like the rest.
 	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
 		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
-		GITURL=https://github.com/riscv/riscv-musl.git
-		get_git_sources staging
+		GITURL=https://github.com/michaelforney/musl.git
+		get_git_sources riscv
 		if [[ $? != 0 ]]; then
 			return $?;
 		fi
 		SOURCES_DIR=${SOURCES}/riscv-toolchains
-		if [[ ${TC_TYPE} == "musl32" ]]; then
-			TC_OPTS="--with-arch=rv32gc"
-		fi
 		TC_MKTARGET="musl"
 	fi
 
@@ -428,6 +464,7 @@ function build_linux () {
 	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
 	local GITURL=https://git.kernel.org/${GITPATH}
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local CONFIG_DIR=${TARGET_PATH}/configs/
 	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
 	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
@@ -450,20 +487,29 @@ function build_linux () {
 	mkdir -p ${INSTALL_DIR} &>> ${LOGFILE}
 
 	pr_inf "Checking out Linux sources..."
-	get_git_sources
+	get_git_sources fixes
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
 
+	cd ${SOURCES_DIR}
 	pr_inf "Preparing kernel sources..."
 	apply_patches "kernel"
 
 	pr_inf "Configuring kernel sources..."
-	cd ${SOURCES_DIR}
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
-	ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
-	make defconfig &>> ${LOGFILE}
+
+	if [[ -f ${CONFIG_DIR}/linux ]]; then
+		pr_dbg "Using provided config file"
+		cp ${CONFIG_DIR}/linux ./.config
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+		make olddefconfig &>> ${LOGFILE}
+	else
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+		make defconfig &>> ${LOGFILE}
+	fi
+
 	if [[ $? != 0 ]]; then
 		pr_err "\tConfig failed, check out ${LOGFILE}..."
 		return -1;
@@ -507,6 +553,7 @@ function build_linux () {
 		rm vmlinux &>> ${LOGFILE}
 		rm arch/riscv/boot/Image &>> ${LOGFILE}
 		rm arch/riscv/boot/Image.gz &>> ${LOGFILE}
+		fakeroot mknod -m 622 ${ROOTFS_INSTALL_DIR}/dev/console c 5 1 && \
 		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
 		make -j${NUM_JOBS} &>> ${LOGFILE}
 		if [[ $? != 0 ]]; then
@@ -710,6 +757,7 @@ function build_rootfs () {
 	fi
 
 	pr_inf "Creating initramfs image..."
+	fakeroot mknod -m 622 dev/console c 5 1 && \
 	find . -print0 | cpio --null -ov --format=newc > \
 	     ${TMP_DIR}/initramfs.cpio 2>> ${LOGFILE}
 	cd ${TMP_DIR}
