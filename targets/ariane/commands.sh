@@ -9,6 +9,8 @@ function target_usage () {
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
 	pr_inf "\tflash_ariane_mcs: (Re)Flash ariane mcs file to the Genesys2 board"
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
+	pr_inf "\tformat_sd: (Re)Format an SD card for booting the board"
+	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
 	pr_inf "\tflash_bootimg_bbl: (Re)Flash boot image based on BBL (bbl + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
 	pr_inf "\tflash_bootimg_osbi: (Re)Flash boot image based on OpenSBI (osbi + Linux + rootfs) (requires root)"
@@ -31,7 +33,7 @@ function target_env_check() {
 	# Command filter
 	if [[ "${2}" != "bootstrap" && "${2}" != "build_ariane_mcs" && \
 	      "${2}" != "flash_ariane_mcs" && "${2}" != "flash_bootimg_bbl" && \
-	      "${2}" != "flash_bootimg_osbi" ]];
+	      "${2}" != "flash_bootimg_osbi" && "${2}" != "format_sd" ]];
 	      then
 		pr_err "Invalid command for ${1}"
 		target_usage
@@ -194,10 +196,37 @@ function flash_ariane_mcs () {
 	cd ${SAVED_PWD}
 }
 
+function format_sd () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/fu540-format-sd.log
+
+	if [[ ! -b ${1} ]]; then
+		pr_err "Not a block device"
+		return -1;
+	fi
+
+	pr_inf "Formatting sd card at ${1}"
+
+	sgdisk --clear \
+		--new=1:2048:67583 --change-name=1:bootloader \
+		--typecode=1:3000 \
+		--new=2:264192: --change-name=2:root \
+		--typecode=2:8300 \
+		${1} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "Failed to format sd, check out ${LOGFILE}"
+		return -1;
+	fi
+
+	partprobe &>> ${LOGFILE}
+
+	cd ${SAVED_PWD}
+}
+
 function flash_bootimg_bbl () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/ariane-bootimg-flash.log
-	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl/
+	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
 	local BOOT_PARTITION=$(fdisk -l | grep ${1} | grep "ONIE boot" | awk '{print $1}')
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -210,15 +239,19 @@ function flash_bootimg_bbl () {
 	fi
 
 	riscv64-unknown-elf-objcopy -S -O binary --change-addresses -0x80000000 \
-				    ${BBL_INSTALL_DIR}/bbl
+				    ${BBL_INSTALL_DIR}/bbl ${TMP_DIR}/bbl &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "Unable to prepare binary, check out ${LOGFILE}"
+		return -1;
+	fi
 
-	dd if=${BBL_INSTALL_DIR}/bbl of=${BOOT_PARTITION} status=progress \
+	dd if=${TMP_DIR}/bbl of=${BOOT_PARTITION} status=progress \
 	   oflag=sync bs=1M &>> ${LOGFILE}
 
 	sync;sync
 	eject ${1}
 
-	cd ${SAVED_PWD}	
+	cd ${SAVED_PWD}
 }
 
 function flash_bootimg_osbi () {
@@ -234,7 +267,14 @@ function flash_bootimg_osbi () {
 		return -1;
 	fi
 
-	dd if=${OSBI_INSTALL_DIR}/fw_payload.bin of=${BOOT_PARTITION} status=progress \
+	riscv64-unknown-elf-objcopy -S -O binary --change-addresses -0x80000000 \
+				   ${OSBI_INSTALL_DIR}/fw_payload.elf ${TMP_DIR}/osbi &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "Unable to prepare binary, check out ${LOGFILE}"
+		return -1;
+	fi
+
+	dd if=${TMP_DIR}/osbi of=${BOOT_PARTITION} status=progress \
 	   oflag=sync bs=1M &>> ${LOGFILE}
 
 	sync;sync
