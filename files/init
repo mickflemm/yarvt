@@ -54,6 +54,8 @@ if [[ $? == 0 ]]; then
         ip link set eth0 up
         udhcpc -b > /dev/console &
 	dropbear -R -b /etc/motd &
+	mkdir -p /usr/bin
+	ln -s /bin/dropbearmulti /usr/bin/dbclient
 	ntpd &
 	echo "You may login remotely through ssh over network or" > /dev/console
 	echo "your host's port 2222 (in case of QEMU) using root/riscv" > /dev/console
