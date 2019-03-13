@@ -259,6 +259,8 @@ function flash_bootimg_osbi () {
 	local LOGFILE=${TMP_DIR}/ariane-bootimg-flash.log
 	local OSBI_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
 	local BOOT_PARTITION=$(fdisk -l | grep ${1} | grep "ONIE boot" | awk '{print $1}')
+	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
+	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
 	pr_inf "Flashing unified boot image (osbi + Linux + initramfs)"
 
