@@ -323,6 +323,9 @@ function build_dropbear () {
 	ln -s dropbearmulti dropbear
 	ln -s dropbearmulti ssh
 	ln -s dropbearmulti scp
+	mkdir -p ${INSTALL_DIR}/usr/bin
+	cd ${INSTALL_DIR}/usr/bin
+	ln -s /bin/dropbearmulti dbclient
 
 	cd ${SAVED_PWD}
 }
