@@ -28,6 +28,7 @@ TARGET=""
 TARGET_PATH=""
 INITRAMFS_SKIP_IMAGE=0
 KERNEL_EMBED_INITRAMFS=0
+GIT_CLONE_RECURSIVE=1
 
 ##################
 # CONSOLE OUTPUT #
@@ -61,9 +62,7 @@ function pr_err () {
 # HELPERS #
 ###########
 
-function git_update() {
-	pr_dbg "Updating ${SOURCES_DIR}..."
-	cd ${SOURCES_DIR}
+function git_cleanup () {
 	git checkout -f ${1} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\Git checkout failed, check out ${LOGFILE}"
@@ -74,6 +73,13 @@ function git_update() {
 	for i in $(git status -u -s | awk '{print $2}'); do
 		rm -f ${i} &>> ${LOGFILE}
 	done
+}
+
+function git_update() {
+	pr_dbg "Updating ${SOURCES_DIR}..."
+	cd ${SOURCES_DIR}
+
+	git_cleanup ${1}
 
 	git pull &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
@@ -89,12 +95,17 @@ function git_update() {
 
 function git_clone() {
 	local BRANCH=""
+	local RECURSIVE=""
 	pr_dbg "Cloning ${GITURL} to ${SOURCES_DIR}..."
 	if [[ ${1} != "" ]]; then
 		BRANCH="-b ${1}"
 		pr_dbg "Using branch ${1}..."
 	fi
-	git clone --recursive ${BRANCH} --depth=1 ${GITURL} \
+	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
+		RECURSIVE="--recursive"
+		pr_dbg "Recursive checkout"
+	fi
+	git clone ${RECURSIVE} ${BRANCH} --depth=1 ${GITURL} \
 		-j ${NUM_JOBS} ${SOURCES_DIR} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tGit clone failed, check out ${LOGFILE}"
@@ -114,6 +125,31 @@ function get_git_sources() {
 		fi
 	else
 		git_clone ${1}
+	fi
+}
+
+function get_git_submodule () {
+	local RECURSIVE=""
+	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
+		RECURSIVE="--recursive"
+		pr_dbg "Recursive checkout"
+	fi
+	if [[ -d ${1} ]]; then
+		if [[ ${CLEAR_SOURCES} == 1 ]]; then
+			pr_dbg "Cleaning up ${1}..."
+			rm -rf ${1} &>> ${LOGFILE}
+		else
+			cd ${1}
+			git_cleanup
+			cd ../
+		fi
+	fi;
+	pr_dbg "Checking out submodule ${1}"
+	git submodule update --init ${RECURSIVE} \
+			     --recommend-shallow ${1} &>> ${LOGFILE}
+	if [[ $? != 0 ]]; then
+		pr_err "\tSubmodule update failed, check out ${LOGFILE}"
+		return -1;
 	fi
 }
 

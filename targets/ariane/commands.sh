@@ -124,7 +124,7 @@ function build_ariane_mcs () {
 			pr_err "\tFetch failed, check out ${LOGFILE}..."
 			return -1;
 		fi
-		unzip master.zip
+		unzip master.zip &>> ${LOGFILE}
 		cp -a vivado-boards-master/new/board_files/* ${VIVADO_BOARD_FILES} &>> ${LOGFILE}
 	fi
 
