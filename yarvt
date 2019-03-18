@@ -86,7 +86,7 @@ function git_update() {
 		pr_err "\Git pull failed, check out ${LOGFILE}"
 		return -1;
 	fi
-	git submodule update &>> ${LOGFILE}
+	git submodule update -j ${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\Git submodules update failed, check out ${LOGFILE}"
 		return -1;
@@ -130,23 +130,25 @@ function get_git_sources() {
 
 function get_git_submodule () {
 	local RECURSIVE=""
+	local SHALLOW="--depth=10"
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
 		RECURSIVE="--recursive"
 		pr_dbg "Recursive checkout"
 	fi
-	if [[ -d ${1} ]]; then
+	if [[ -e ${1}/.git ]]; then
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${1}..."
 			rm -rf ${1} &>> ${LOGFILE}
 		else
+			SHALLOW=""
 			cd ${1}
 			git_cleanup
 			cd ../
 		fi
 	fi;
 	pr_dbg "Checking out submodule ${1}"
-	git submodule update --init ${RECURSIVE} \
-			     --recommend-shallow ${1} &>> ${LOGFILE}
+	git submodule update --init ${RECURSIVE} -j ${NUM_JOBS} \
+			     ${SHALLOW} ${1} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tSubmodule update failed, check out ${LOGFILE}"
 		return -1;
@@ -390,10 +392,42 @@ function build_toolchain () {
 	pr_ann "RISC-V ${TC_TYPE} toolchain"
 
 	pr_inf "Checking out toolchain sources..."
+	GIT_CLONE_RECURSIVE=0
 	get_git_sources
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
+
+	cd ${SOURCES_DIR}
+	get_git_submodule riscv-binutils
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	get_git_submodule riscv-gcc
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	get_git_submodule riscv-gdb
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	if [[ ${TC_TYPE} == "glibc" ]]; then
+		get_git_submodule riscv-glibc
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+	fi
+
+	if [[ ${TC_TYPE} == "newlib" ]]; then
+		get_git_submodule riscv-newlib
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+	fi
+	GIT_CLONE_RECURSIVE=1
 
 	# Musl doesn't support multilib
 	if [[ ${TC_TYPE} == "newlib" || ${TC_TYPE} == "glibc" ]]; then
@@ -809,11 +843,15 @@ function bootstrap () {
 	if [[ ${TARGET} != "" ]]; then
 		target_bootstrap
 	else
-		build_toolchain newlib
-		build_toolchain glibc
-		build_toolchain musl32
-		build_toolchain musl64
-		build_qemu
+		if build_toolchain newlib &&
+		   build_toolchain glibc &&
+		   build_toolchain musl32 &&
+		   build_toolchain musl64 &&
+		   build_qemu ; then
+			return 0;
+		else
+			return -1;
+		fi
 	fi
 }
 
