@@ -377,7 +377,7 @@ function build_toolchain () {
 	local GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
 	local TC_TYPE="${1}"
 	local INSTALL_DIR=${BINDIR}/riscv-${TC_TYPE}-toolchain
-	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
+	local BASE_ISA_XLEN=64
 	local TC_MKTARGET=""
 	local TC_OPTS=""
 	local MARCH=""
@@ -387,6 +387,10 @@ function build_toolchain () {
 	      ${TC_TYPE} != "musl32" && ${TC_TYPE} != "musl64" ]]; then
 		pr_err "Invalid toolchain type selected, aborting..."
 		return -1;
+	fi
+
+	if [[ ${TC_TYPE} == "musl32" ]]; then
+		BASE_ISA_XLEN=32
 	fi
 
 	pr_ann "RISC-V ${TC_TYPE} toolchain"
