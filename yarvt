@@ -535,7 +535,7 @@ function build_linux () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rvlinux.log
 	local SOURCES_DIR=${SOURCES}/riscv-linux
-	local GITPATH=pub/scm/linux/kernel/git/palmer/riscv-linux.git
+	local GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
 	local GITURL=https://git.kernel.org/${GITPATH}
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
 	local CONFIG_DIR=${TARGET_PATH}/configs/
@@ -561,7 +561,7 @@ function build_linux () {
 	mkdir -p ${INSTALL_DIR} &>> ${LOGFILE}
 
 	pr_inf "Checking out Linux sources..."
-	get_git_sources fixes
+	get_git_sources
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
