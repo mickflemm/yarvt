@@ -29,6 +29,7 @@ TARGET_PATH=""
 INITRAMFS_SKIP_IMAGE=0
 KERNEL_EMBED_INITRAMFS=0
 GIT_CLONE_RECURSIVE=1
+MEM_START=0x0
 
 ##################
 # CONSOLE OUTPUT #
@@ -696,11 +697,13 @@ function build_bbl () {
 			--enable-logo \
 			--host=riscv64-unknown-elf \
 			--with-payload=${PAYLOAD} \
+			--with-mem-start=${MEM_START} \
 			${BBL_OPTS} &>> ${LOGFILE}
 	else
 		../configure \
 			--enable-logo \
 			--host=riscv64-unknown-elf \
+			--with-mem-start=${MEM_START} \
 			${BBL_OPTS} &>> ${LOGFILE}
 	fi
 	if [[ $? != 0 ]]; then

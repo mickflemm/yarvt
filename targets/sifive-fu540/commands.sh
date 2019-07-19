@@ -1,6 +1,7 @@
 BBL_PARTGUID="2E54B353-1271-4842-806F-E436D6AF6985"
 LINUX_PARTGUID="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 FSBL_TYPE=""
+MEM_START=0x80000000
 
 function target_usage () {
 	pr_inf "\nTARGET: SiFive HiFive Unleashed (Freedom U540)"
@@ -99,8 +100,8 @@ function flash_bootimg_bbl () {
 		return -1;
 	fi
 
-	riscv64-unknown-elf-objcopy -S -O binary --change-addresses -0x80000000 \
-				    ${BBL_INSTALL_DIR}/bbl ${TMP_DIR}/bbl &>> ${LOGFILE}
+	riscv64-unknown-elf-objcopy -S -O binary \
+			${BBL_INSTALL_DIR}/bbl ${TMP_DIR}/bbl &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "Unable to prepare binary, check out ${LOGFILE}"
 		return -1;
@@ -130,14 +131,7 @@ function flash_bootimg_osbi () {
 		return -1;
 	fi
 
-	riscv64-unknown-elf-objcopy -S -O binary --change-addresses -0x80000000 \
-				   ${OSBI_INSTALL_DIR}/fw_payload.elf ${TMP_DIR}/osbi &>> ${LOGFILE}
-	if [[ $? != 0 ]]; then
-		pr_err "Unable to prepare binary, check out ${LOGFILE}"
-		return -1;
-	fi
-
-	dd if=${TMP_DIR}/osbi of=${1}1 status=progress \
+	dd if=${OSBI_INSTALL_DIR}/fw_payload.bin of=${BOOT_PARTITION} status=progress \
 	   oflag=sync bs=1M &>> ${LOGFILE}
 
 	sync;sync
