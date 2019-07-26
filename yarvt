@@ -495,8 +495,11 @@ function build_qemu () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/qemu.log
 	local SOURCES_DIR=${SOURCES}/riscv-qemu
-	local GITURL=https://github.com/riscv/riscv-qemu.git
+	local GITURL=https://git.qemu.org/git/qemu.git
 	local INSTALL_DIR=${BINDIR}/riscv-qemu
+	local TARGET_LIST_SYSTEM="riscv64-softmmu,riscv32-softmmu"
+	local TARGET_LIST_USER="riscv64-linux-user,riscv32-linux-user"
+	local TARGET_LIST=${TARGET_LIST_SYSTEM},${TARGET_LIST_USER}
 
 	pr_ann "RISC-V QEMU"
 
@@ -510,7 +513,7 @@ function build_qemu () {
 	cd ${SOURCES_DIR}
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
-	./configure --target-list=riscv64-softmmu,riscv32-softmmu \
+	./configure --target-list=${TARGET_LIST} \
 		    --prefix=${INSTALL_DIR} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tConfig failed, check out ${LOGFILE}..."
@@ -869,7 +872,8 @@ function setup_env () {
 	local TC_MUSL64_PATH=${BINDIR}/riscv-musl64-toolchain/bin
 	local TC_MUSL_PATHS=${TC_MUSL32_PATH}:${TC_MUSL64_PATH}
 	local ALL_TC_PATHS=${TC_NEWLIB_PATH}:${TC_GLIBC_PATH}:${TC_MUSL_PATHS}
-	export PATH=${PATH}:${ALL_TC_PATHS}
+	local QEMU_PATH=${BINDIR}/riscv-qemu/bin
+	export PATH=${PATH}:${ALL_TC_PATHS}:${QEMU_PATH}
 }
 
 function cleanup () {
