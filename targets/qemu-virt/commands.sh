@@ -46,6 +46,7 @@ function target_env_check() {
 function target_env_prepare () {
 	TARGET=${1}
 	BBL_WITH_PAYLOAD=0
+	MEM_START=0x80000000
 	OSBI_PLATFORM="qemu/virt"
 }
 
@@ -89,7 +90,7 @@ function run_linux () {
 		-object rng-random,filename=/dev/urandom,id=rng0 \
 		-device virtio-rng-device,rng=rng0 \
 		-bios ${BIOS} \
-		-kernel ${LINUX_INSTALL_DIR}/vmlinux \
+		-kernel ${LINUX_INSTALL_DIR}/Image \
 		-initrd ${ROOTFS_INSTALL_DIR}/initramfs.img
 
 	cd ${SAVED_PWD}
