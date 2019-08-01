@@ -35,7 +35,7 @@ MEM_START=0x0
 # GIT REPOSITORIES #
 ####################
 LINUX_KERNEL_GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
-LINUX_KERNEL_GITURL=https://git.kernel.org/${GITPATH}
+LINUX_KERNEL_GITURL=https://git.kernel.org/${LINUX_KERNEL_GITPATH}
 LINUX_KERNEL_GITBRANCH=""
 
 BBL_GITURL=https://github.com/riscv/riscv-pk.git
