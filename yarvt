@@ -31,6 +31,19 @@ KERNEL_EMBED_INITRAMFS=0
 GIT_CLONE_RECURSIVE=1
 MEM_START=0x0
 
+####################
+# GIT REPOSITORIES #
+####################
+LINUX_KERNEL_GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
+LINUX_KERNEL_GITURL=https://git.kernel.org/${GITPATH}
+LINUX_KERNEL_GITBRANCH=""
+
+BBL_GITURL=https://github.com/riscv/riscv-pk.git
+BBL_GITBRANCH=""
+
+OSBI_GITURL=https://github.com/riscv/opensbi.git
+OSBI_GITBRANCH=""
+
 ##################
 # CONSOLE OUTPUT #
 ##################
@@ -539,8 +552,7 @@ function build_linux () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rvlinux.log
 	local SOURCES_DIR=${SOURCES}/riscv-linux
-	local GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
-	local GITURL=https://git.kernel.org/${GITPATH}
+	local GITURL=${LINUX_KERNEL_GITURL}
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
 	local CONFIG_DIR=${TARGET_PATH}/configs/
 	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
@@ -565,7 +577,7 @@ function build_linux () {
 	mkdir -p ${INSTALL_DIR} &>> ${LOGFILE}
 
 	pr_inf "Checking out Linux sources..."
-	get_git_sources
+	get_git_sources ${LINUX_KERNEL_GITBRANCH}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
@@ -651,7 +663,7 @@ function build_bbl () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/bbl.log
 	local SOURCES_DIR=${SOURCES}/riscv-bbl
-	local GITURL=https://github.com/riscv/riscv-pk.git
+	local GITURL=${BBL_GITURL}
 	local BUILD_DIR=${SOURCES_DIR}/build
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
 	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
@@ -679,7 +691,7 @@ function build_bbl () {
 	fi
 
 	pr_inf "Checking out BBL sources..."
-	get_git_sources
+	get_git_sources ${BBL_GITBRANCH}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
@@ -733,7 +745,7 @@ function build_osbi () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/osbi.log
 	local SOURCES_DIR=${SOURCES}/riscv-opensbi
-	local GITURL=https://github.com/riscv/opensbi.git
+	local GITURL=${OSBI_GITURL}
 	local BUILD_DIR=${SOURCES_DIR}/build
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
 	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
@@ -764,7 +776,7 @@ function build_osbi () {
 	fi
 
 	pr_inf "Checking out OpenSBI sources..."
-	get_git_sources
+	get_git_sources ${OSBI_GITBRANCH}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
