@@ -36,7 +36,7 @@ MEM_START=0x0
 ####################
 LINUX_KERNEL_GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
 LINUX_KERNEL_GITURL=https://git.kernel.org/${LINUX_KERNEL_GITPATH}
-LINUX_KERNEL_GITBRANCH=""
+LINUX_KERNEL_GITBRANCH="fixes"
 
 BBL_GITURL=https://github.com/riscv/riscv-pk.git
 BBL_GITBRANCH=""
@@ -396,6 +396,8 @@ function build_toolchain () {
 	local TC_OPTS=""
 	local MARCH=""
 	local MABI=""
+	local MUSL_BRANCH=""
+	local SAVED_CLEAR_SOURCES=${CLEAR_SOURCES}
 
 	if [[ ${TC_TYPE} != "newlib" && ${TC_TYPE} != "glibc" &&
 	      ${TC_TYPE} != "musl32" && ${TC_TYPE} != "musl64" ]]; then
@@ -410,42 +412,42 @@ function build_toolchain () {
 	pr_ann "RISC-V ${TC_TYPE} toolchain"
 
 	pr_inf "Checking out toolchain sources..."
-	GIT_CLONE_RECURSIVE=0
+#	GIT_CLONE_RECURSIVE=0
 	get_git_sources
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
 
-	cd ${SOURCES_DIR}
-	get_git_submodule riscv-binutils
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
+#	cd ${SOURCES_DIR}
+#	get_git_submodule riscv-binutils
+#	if [[ $? != 0 ]]; then
+#		return $?;
+#	fi
 
-	get_git_submodule riscv-gcc
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
+#	get_git_submodule riscv-gcc
+#	if [[ $? != 0 ]]; then
+#		return $?;
+#	fi
 
-	get_git_submodule riscv-gdb
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
+#	get_git_submodule riscv-gdb
+#	if [[ $? != 0 ]]; then
+#		return $?;
+#	fi
 
-	if [[ ${TC_TYPE} == "glibc" ]]; then
-		get_git_submodule riscv-glibc
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
-	fi
+#	if [[ ${TC_TYPE} == "glibc" ]]; then
+#		get_git_submodule riscv-glibc
+#		if [[ $? != 0 ]]; then
+#			return $?;
+#		fi
+#	fi
 
-	if [[ ${TC_TYPE} == "newlib" ]]; then
-		get_git_submodule riscv-newlib
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
-	fi
-	GIT_CLONE_RECURSIVE=1
+#	if [[ ${TC_TYPE} == "newlib" ]]; then
+#		get_git_submodule riscv-newlib
+#		if [[ $? != 0 ]]; then
+#			return $?;
+#		fi
+#	fi
+#	GIT_CLONE_RECURSIVE=1
 
 	# Musl doesn't support multilib
 	if [[ ${TC_TYPE} == "newlib" || ${TC_TYPE} == "glibc" ]]; then
@@ -473,10 +475,18 @@ function build_toolchain () {
 	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
 		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
 		GITURL=https://github.com/riscv/riscv-musl.git
-		get_git_sources staging
+		if [[ ${TC_TYPE} == "musl32" ]]; then
+			MUSL_BRANCH=develop
+		else
+			MUSL_BRANCH=staging
+		fi
+		# Clear sources when switching branches
+		CLEAR_SOURCES=1
+		get_git_sources ${MUSL_BRANCH}
 		if [[ $? != 0 ]]; then
 			return $?;
 		fi
+		CLEAR_SOURCES=${SAVED_CLEAR_SOURCES}
 		SOURCES_DIR=${SOURCES}/riscv-toolchains
 		TC_MKTARGET="musl"
 	fi
