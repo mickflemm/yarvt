@@ -14,6 +14,8 @@ function target_usage () {
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
 	pr_inf "\tflash_bootimg_osbi: (Re)Flash boot image based on OpenSBI (osbi + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
+	pr_inf "\tqemu_test_bbl: Test the BBL-based boot image on QEMU"
+	pr_inf "\tqemu_test_osbi: Test the OpenSBI-based boot image on QEMU"
 }
 
 function target_env_check() {
@@ -31,7 +33,8 @@ function target_env_check() {
 
 	# Command filter
 	if [[ "${2}" != "bootstrap" && "${2}" != "format_sd" && \
-	      "${2}" != "flash_bootimg_bbl" && "${2}" != "flash_bootimg_osbi" ]];
+	      "${2}" != "flash_bootimg_bbl" && "${2}" != "flash_bootimg_osbi" &&
+	      "${2}" != "qemu_test_bbl" && "${2}" != "qemu_test_osbi" ]];
 	      then
 		pr_err "Invalid command for ${1}"
 		target_usage
@@ -138,4 +141,42 @@ function flash_bootimg_osbi () {
 	eject ${1}
 
 	cd ${SAVED_PWD}	
+}
+
+function qemu_test () {
+	local SAVED_PWD=${PWD}
+	local QEMU_INSTALL_DIR=${BINDIR}/riscv-qemu
+	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
+	local OSBI_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi
+	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux
+	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
+	local QEMU=${QEMU_INSTALL_DIR}/bin/qemu-system-riscv${BASE_ISA_XLEN}
+	local BIOS=""
+
+	if [[ ${FSBL_TYPE} == "bbl" ]]; then
+		BIOS=${BBL_INSTALL_DIR}/bbl.bin
+	elif [[ ${FSBL_TYPE} == "osbi" ]]; then
+		BIOS=${OSBI_INSTALL_DIR}/fw_payload.bin
+	else
+		pr_err "Unknown FSBL type"
+		return -2;
+	fi
+
+	${QEMU} -nographic -machine sifive_u -cpu sifive-u54 \
+		-smp cpus=5,maxcpus=5 -m 4G \
+		-bios ${BIOS}
+
+	cd ${SAVED_PWD}
+	KEEP_LOGS=0
+}
+
+function qemu_test_bbl () {
+	FSBL_TYPE="bbl"
+	qemu_test;
+}
+
+function qemu_test_osbi () {
+	FSBL_TYPE="osbi"
+	qemu_test;
 }
