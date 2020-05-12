@@ -770,7 +770,7 @@ function build_osbi () {
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	local CC_PREFIX=riscv64-unknown-linux-gnu-
+	local CC_PREFIX=riscv64-unknown-elf-
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
@@ -801,6 +801,8 @@ function build_osbi () {
 
 	cd ${SOURCES_DIR}
 	make distclean &>> ${LOGFILE}
+	pr_inf "Preparing OpenSBI sources..."
+	apply_patches "osbi"
 
 	pr_inf "Building OpenSBI..."
 	CROSS_COMPILE=${CC_PREFIX} PLATFORM_RISCV_XLEN=${BASE_ISA_XLEN} \
