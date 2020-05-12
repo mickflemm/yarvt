@@ -44,6 +44,12 @@ BBL_GITBRANCH=""
 OSBI_GITURL=https://github.com/riscv/opensbi.git
 OSBI_GITBRANCH=""
 
+QEMU_GITURL=https://git.qemu.org/git/qemu.git
+QEMU_GITBRANCH="v5.0.0"
+
+BBOX_GITURL=git://busybox.net/busybox.git
+BBOX_GITBRANCH="1_31_stable"
+
 ##################
 # CONSOLE OUTPUT #
 ##################
@@ -269,7 +275,7 @@ function build_busybox () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/bb.log
 	local SOURCES_DIR=${SOURCES}/busybox
-	local GITURL=git://busybox.net/busybox.git
+	local GITURL=${BBOX_GITURL}
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
@@ -294,7 +300,7 @@ function build_busybox () {
 	fi
 
 	pr_inf "Checking out BusyBox sources..."
-	get_git_sources 1_29_stable
+	get_git_sources ${BBOX_GITBRANCH}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
@@ -518,7 +524,7 @@ function build_qemu () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/qemu.log
 	local SOURCES_DIR=${SOURCES}/riscv-qemu
-	local GITURL=https://git.qemu.org/git/qemu.git
+	local GITURL=${QEMU_GITURL}
 	local INSTALL_DIR=${BINDIR}/riscv-qemu
 	local TARGET_LIST_SYSTEM="riscv64-softmmu,riscv32-softmmu"
 	local TARGET_LIST_USER="riscv64-linux-user,riscv32-linux-user"
@@ -527,10 +533,12 @@ function build_qemu () {
 	pr_ann "RISC-V QEMU"
 
 	pr_inf "Checking out QEMU sources..."
-	get_git_sources
+	GIT_CLONE_RECURSIVE=0
+	get_git_sources ${QEMU_GITBRANCH}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
+	GIT_CLONE_RECURSIVE=1
 
 	pr_inf "Configuring qemu sources..."
 	cd ${SOURCES_DIR}

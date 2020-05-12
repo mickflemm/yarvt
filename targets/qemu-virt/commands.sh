@@ -47,7 +47,7 @@ function target_env_prepare () {
 	TARGET=${1}
 	BBL_WITH_PAYLOAD=0
 	MEM_START=0x80000000
-	OSBI_PLATFORM="qemu/virt"
+	OSBI_PLATFORM="generic"
 }
 
 function target_bootstrap () {
