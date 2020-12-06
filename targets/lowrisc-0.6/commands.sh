@@ -4,13 +4,11 @@ function target_usage () {
 	pr_inf "\nTARGET: LowRISC SoC v0.6"
 	pr_inf "\nlowrisc-0.6 commands:"
 	pr_inf "\thelp/usage: Print this message"
-	pr_inf "\tbootstrap: (Re)Build unified images (bbl/osbi + Linux + rootfs)"
+	pr_inf "\tbootstrap: (Re)Build unified image (osbi + Linux + rootfs)"
 	pr_inf "\tbuild_lowrisc_mcs: (Re)Build chip_top_new mcs file"
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
 	pr_inf "\tflash_lowrisc_mcs: (Re)Flash chip_top_new mcs file to the Nexys 4 DDR board"
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
-	pr_inf "\tcopy_bootimg_bbl: Copy boot image based on BBL (bbl + Linux + rootfs) to SD Card"
-	pr_wrn "\t<arg>: The target partition on the SD card, e.g. /dev/sdd1 (check out dmesg / fdisk -l)"
 	pr_inf "\tcopy_bootimg_osbi: Copy boot image based on OpenSBI (osbi + Linux + rootfs) to SD Card"
 	pr_wrn "\t<arg>: The target partition on the SD card, e.g. /dev/sdd1 (check out dmesg / fdisk -l)"
 	pr_inf "\n\nINFO:"
@@ -36,8 +34,7 @@ function target_env_check() {
 
 	# Command filter
 	if [[ "${2}" != "bootstrap" && "${2}" != "build_lowrisc_mcs" && \
-	      "${2}" != "flash_lowrisc_mcs" && "${2}" != "copy_bootimg_bbl" && \
-	      "${2}" != "copy_bootimg_osbi" ]];
+	      "${2}" != "flash_lowrisc_mcs" && "${2}" != "copy_bootimg_osbi" ]];
 	      then
 		pr_err "Invalid command for ${1}"
 		target_usage
@@ -49,18 +46,14 @@ function target_env_check() {
 
 function target_env_prepare () {
 	TARGET=${1}
-	BBL_WITH_PAYLOAD=0
 	OSBI_PLATFORM="qemu/virt"
+	KERNEL_EMBED_INITRAMFS=1
+	OSBI_WITH_PAYLOAD=1
 	BASE_ISA=RV64I
-	ABI=imac
 }
 
 function target_bootstrap () {
-	KERNEL_EMBED_INITRAMFS=1
 	build_linux
-	BBL_WITH_PAYLOAD=1
-	build_bbl
-	OSBI_WITH_PAYLOAD=1
 	build_osbi
 }
 
@@ -196,33 +189,13 @@ function flash_lowrisc_mcs () {
 	cd ${SAVED_PWD}
 }
 
-function copy_bootimg_bbl () {
-	local SAVED_PWD=${PWD}
-	local LOGFILE=${TMP_DIR}/lowrisc-0.6-bootimg-copy.log
-	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
-	local TARGET_DIR=$(df | grep /dev/sde1 | awk '{print $NF}')
-
-	pr_inf "Copying unified boot image (bbl + Linux + initramfs) to SD Card"
-
-	cp ${BBL_INSTALL_DIR}/bbl ${TARGET_DIR}/boot.bin &>> ${LOGFILE}
-
-	if [[ $? != 0 ]]; then
-		pr_err "Unable to copy image, check out ${LOGFILE}"
-		return -1;
-	fi
-
-	sync;sync
-	eject ${1} &>> ${LOGFILE}
-	cd ${SAVED_PWD}
-}
-
 function copy_bootimg_osbi () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/lowrisc-0.6-bootimg-copy.log
 	local OSBI_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
 	local TARGET_DIR=$(df | grep /dev/sde1 | awk '{print $NF}')
 
-	pr_inf "Copying unified boot image (bbl + Linux + initramfs) to SD Card"
+	pr_inf "Copying unified boot image (osbi + Linux + initramfs) to SD Card"
 
 	cp ${OSBI_INSTALL_DIR}/fw_payload.elf ${TARGET_DIR}/boot.bin &>> ${LOGFILE}
 

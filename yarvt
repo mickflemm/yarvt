@@ -19,8 +19,6 @@ else
 	KEEP_LOGS=0
 fi
 BASE_ISA=RV64I
-ABI=imafdc
-BBL_WITH_PAYLOAD=0
 OSBI_WITH_PAYLOAD=0
 OSBI_PLATFORM=""
 WORKDIR=${BINDIR}
@@ -38,9 +36,6 @@ LINUX_KERNEL_GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
 LINUX_KERNEL_GITURL=https://git.kernel.org/${LINUX_KERNEL_GITPATH}
 LINUX_KERNEL_GITBRANCH="fixes"
 
-BBL_GITURL=https://github.com/riscv/riscv-pk.git
-BBL_GITBRANCH=""
-
 OSBI_GITURL=https://github.com/riscv/opensbi.git
 OSBI_GITBRANCH=""
 
@@ -49,6 +44,10 @@ QEMU_GITBRANCH="v5.0.0"
 
 BBOX_GITURL=git://busybox.net/busybox.git
 BBOX_GITBRANCH="1_31_stable"
+
+RVGTOOLCHAIN_GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
+RVGTOOLCHAIN_GITBRANCH="master"
+RVGTOOLCHAIN_GITCOMMIT="168878203fa440a799b3c502af2a5b7f0f0eed7e"
 
 ##################
 # CONSOLE OUTPUT #
@@ -116,6 +115,7 @@ function git_update() {
 function git_clone() {
 	local BRANCH=""
 	local RECURSIVE=""
+	local SAVED_PWD=${PWD}
 	pr_dbg "Cloning ${GITURL} to ${SOURCES_DIR}..."
 	if [[ ${1} != "" ]]; then
 		BRANCH="-b ${1}"
@@ -131,7 +131,12 @@ function git_clone() {
 		pr_err "\tGit clone failed, check out ${LOGFILE}"
 		return -1;
 	fi
-
+	if [[ ${2} != "" ]]; then
+		cd ${SOURCES_DIR}
+		git checkout -b snapshot ${2} >> ${LOGFILE}
+		pr_dbg "Switching to commit ${2}"
+		cd ${SAVED_PWD}
+	fi
 }
 
 function get_git_sources() {
@@ -139,12 +144,16 @@ function get_git_sources() {
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${SOURCES_DIR}..."
 			rm -rf ${SOURCES_DIR} &>> ${LOGFILE}
-			git_clone ${1}
+			git_clone ${1} ${2}
 		else
-			git_update ${1}
+			if [[ ${2} != "" ]]; then
+				git_update snapshot
+			else
+				git_update ${1}
+			fi
 		fi
 	else
-		git_clone ${1}
+		git_clone ${1} ${2}
 	fi
 }
 
@@ -285,13 +294,14 @@ function build_busybox () {
 	local MABI=""
 
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
-		MABI=lp64
+		MABI=lp64d
+		MARCH=rv${BASE_ISA_XLEN}imafdc
 	else
 		MABI=ilp32
+		MARCH=rv${BASE_ISA_XLEN}imac
 	fi
 
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-	MARCH=rv${BASE_ISA_XLEN}imac
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
@@ -339,13 +349,14 @@ function build_dropbear () {
 	local MABI=""
 
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
-		MABI=lp64
+		MABI=lp64d
+		MARCH=rv${BASE_ISA_XLEN}imafdc
 	else
 		MABI=ilp32
+		MARCH=rv${BASE_ISA_XLEN}imac
 	fi
 
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-	MARCH=rv${BASE_ISA_XLEN}imac
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
@@ -394,7 +405,7 @@ function build_toolchain () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/toolchain.log
 	local SOURCES_DIR=${SOURCES}/riscv-toolchains
-	local GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
+	local GITURL=${RVGTOOLCHAIN_GITURL}
 	local TC_TYPE="${1}"
 	local INSTALL_DIR=${BINDIR}/riscv-${TC_TYPE}-toolchain
 	local BASE_ISA_XLEN=64
@@ -418,55 +429,59 @@ function build_toolchain () {
 	pr_ann "RISC-V ${TC_TYPE} toolchain"
 
 	pr_inf "Checking out toolchain sources..."
-#	GIT_CLONE_RECURSIVE=0
-	get_git_sources
+	GIT_CLONE_RECURSIVE=0
+	get_git_sources ${RVGTOOLCHAIN_GITBRANCH} ${RVGTOOLCHAIN_GITCOMMIT}
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
 
-#	cd ${SOURCES_DIR}
-#	get_git_submodule riscv-binutils
-#	if [[ $? != 0 ]]; then
-#		return $?;
-#	fi
+	cd ${SOURCES_DIR}
+	get_git_submodule riscv-binutils
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
 
-#	get_git_submodule riscv-gcc
-#	if [[ $? != 0 ]]; then
-#		return $?;
-#	fi
+	get_git_submodule riscv-gcc
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
 
-#	get_git_submodule riscv-gdb
-#	if [[ $? != 0 ]]; then
-#		return $?;
-#	fi
+	get_git_submodule riscv-gdb
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
 
-#	if [[ ${TC_TYPE} == "glibc" ]]; then
-#		get_git_submodule riscv-glibc
-#		if [[ $? != 0 ]]; then
-#			return $?;
-#		fi
-#	fi
+	if [[ ${TC_TYPE} == "glibc" ]]; then
+		get_git_submodule riscv-glibc
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+	fi
 
-#	if [[ ${TC_TYPE} == "newlib" ]]; then
-#		get_git_submodule riscv-newlib
-#		if [[ $? != 0 ]]; then
-#			return $?;
-#		fi
-#	fi
-#	GIT_CLONE_RECURSIVE=1
+	if [[ ${TC_TYPE} == "newlib" ]]; then
+		get_git_submodule riscv-newlib
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+	fi
+	GIT_CLONE_RECURSIVE=1
+
+	# Use medany code model by default
+	TC_OPTS="--with-cmodel=medany"
 
 	# Musl doesn't support multilib
 	if [[ ${TC_TYPE} == "newlib" || ${TC_TYPE} == "glibc" ]]; then
-		TC_OPTS="--enable-multilib"
+		TC_OPTS="${TC_OPTS} --enable-multilib"
 	else
 		if [[ ${BASE_ISA_XLEN} == 64 ]]; then
-			MABI=lp64
+			MABI=lp64d
+			MARCH=rv${BASE_ISA_XLEN}imafdc
 		else
 			MABI=ilp32
+			MARCH=rv${BASE_ISA_XLEN}imac
 		fi
 
-		MARCH=rv${BASE_ISA_XLEN}imac
-		TC_OPTS="--with-arch=${MARCH} --with-abi=${MABI}"
+		TC_OPTS="${TC_OPTS} --with-arch=${MARCH} --with-abi=${MABI}"
 	fi
 
 	if [[ ${TC_TYPE} == "glibc" ]]; then
@@ -480,11 +495,12 @@ function build_toolchain () {
 	# like the rest.
 	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
 		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
-		GITURL=https://github.com/riscv/riscv-musl.git
 		if [[ ${TC_TYPE} == "musl32" ]]; then
-			MUSL_BRANCH=develop
-		else
+			GITURL=https://github.com/riscv/riscv-musl.git
 			MUSL_BRANCH=staging
+		else
+			GITURL=git://git.musl-libc.org/musl
+			MUSL_BRANCH=master
 		fi
 		# Clear sources when switching branches
 		CLEAR_SOURCES=1
@@ -677,88 +693,6 @@ function build_linux () {
 	cd ${SAVED_PWD}
 }
 
-function build_bbl () {
-	local SAVED_PWD=${PWD}
-	local LOGFILE=${TMP_DIR}/bbl.log
-	local SOURCES_DIR=${SOURCES}/riscv-bbl
-	local GITURL=${BBL_GITURL}
-	local BUILD_DIR=${SOURCES_DIR}/build
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
-	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
-	local PAYLOAD=${LINUX_INSTALL_DIR}/vmlinux
-	local BBL_OPTS=""
-	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-
-	pr_ann "Berkeley Boot Loader for ${TARGET}/${BASE_ISA}"
-
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
-	fi
-
-	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
-		if [[ ! -f ${LINUX_INSTALL_DIR}/vmlinux ]]; then
-			pr_err "\tLinux kernel not built"
-			return -2;
-		fi
-	fi
-
-	if [[ ${BASE_ISA} == "RV32I" ]]; then
-		BBL_OPTS="--with-arch=rv32imac"
-	fi
-
-	pr_inf "Checking out BBL sources..."
-	get_git_sources ${BBL_GITBRANCH}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
-
-	cd ${SOURCES_DIR}
-	pr_inf "Preparing BBL sources..."
-	apply_patches "bbl"
-
-	pr_inf "Configuring BBL sources..."
-	if [[ -d ${BUILD_DIR} ]]; then
-		rm -rf ${BUILD_DIR}
-	fi
-
-	mkdir ${BUILD_DIR}  &>> ${LOGFILE}
-	cd ${BUILD_DIR}
-	if [[ ${BBL_WITH_PAYLOAD} == 1 ]]; then
-		../configure \
-			--enable-logo \
-			--host=riscv64-unknown-elf \
-			--with-payload=${PAYLOAD} \
-			--with-mem-start=${MEM_START} \
-			${BBL_OPTS} &>> ${LOGFILE}
-	else
-		../configure \
-			--enable-logo \
-			--host=riscv64-unknown-elf \
-			--with-mem-start=${MEM_START} \
-			${BBL_OPTS} &>> ${LOGFILE}
-	fi
-	if [[ $? != 0 ]]; then
-		pr_err "\tConfig failed, check out ${LOGFILE}..."
-		return -1;
-	fi
-
-	pr_inf "Building BBL..."
-	make -j${NUM_JOBS} &>> ${LOGFILE}
-	if [[ $? != 0 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}..."
-		return -1;
-	fi
-
-	if [[ -d ${INSTALL_DIR} ]]; then
-		rm -rf ${INSTALL_DIR}
-	fi
-	mv ${BUILD_DIR} ${INSTALL_DIR}
-
-	cd ${SAVED_PWD}
-}
-
 function build_osbi () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/osbi.log
@@ -887,7 +821,7 @@ function bootstrap () {
 	else
 		if build_toolchain newlib &&
 		   build_toolchain glibc &&
-		   build_toolchain musl32 &&
+#		   build_toolchain musl32 &&
 		   build_toolchain musl64 &&
 		   build_qemu ; then
 			return 0;
