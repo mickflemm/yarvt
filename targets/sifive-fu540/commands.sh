@@ -7,14 +7,11 @@ function target_usage () {
 	pr_inf "\nTARGET: SiFive HiFive Unleashed (Freedom U540)"
 	pr_inf "\nsifive-fu540 commands:"
 	pr_inf "\thelp/usage: Print this message"
-	pr_inf "\tbootstrap: (Re)Build unified images (bbl/osbi + Linux + rootfs)"
+	pr_inf "\tbootstrap: (Re)Build unified images (osbi + Linux + rootfs)"
 	pr_inf "\tformat_sd: (Re)Format an SD card for booting the board"
-	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
-	pr_inf "\tflash_bootimg_bbl: (Re)Flash boot image based on BBL (bbl + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
 	pr_inf "\tflash_bootimg_osbi: (Re)Flash boot image based on OpenSBI (osbi + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
-	pr_inf "\tqemu_test_bbl: Test the BBL-based boot image on QEMU"
 	pr_inf "\tqemu_test_osbi: Test the OpenSBI-based boot image on QEMU"
 }
 
@@ -33,8 +30,8 @@ function target_env_check() {
 
 	# Command filter
 	if [[ "${2}" != "bootstrap" && "${2}" != "format_sd" && \
-	      "${2}" != "flash_bootimg_bbl" && "${2}" != "flash_bootimg_osbi" &&
-	      "${2}" != "qemu_test_bbl" && "${2}" != "qemu_test_osbi" ]];
+	      "${2}" != "flash_bootimg_osbi" && \
+	      "${2}" != "qemu_test_osbi" ]];
 	      then
 		pr_err "Invalid command for ${1}"
 		target_usage
@@ -46,18 +43,14 @@ function target_env_check() {
 
 function target_env_prepare () {
 	TARGET=${1}
-	BBL_WITH_PAYLOAD=0
+	KERNEL_EMBED_INITRAMFS=1
 	OSBI_PLATFORM="sifive/fu540"
+	OSBI_WITH_PAYLOAD=1
 	BASE_ISA=RV64I
-	ABI=imafdc
 }
 
 function target_bootstrap () {
-	KERNEL_EMBED_INITRAMFS=1
 	build_linux
-	BBL_WITH_PAYLOAD=1
-	build_bbl
-	OSBI_WITH_PAYLOAD=1
 	build_osbi
 }
 
@@ -88,37 +81,6 @@ function format_sd () {
 	cd ${SAVED_PWD}
 }
 
-function flash_bootimg_bbl () {
-	local SAVED_PWD=${PWD}
-	local LOGFILE=${TMP_DIR}/fu540-bootimg-flash.log
-	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl/
-	local PART_GUID=$(sgdisk ${1} -i=1 | grep "Partition GUID code" | awk '{print $4}')
-	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-
-	pr_inf "Flashing unified boot image (bbl + Linux + initramfs)"
-
-	if [[ ${PART_GUID} != ${BBL_PARTGUID} ]]; then
-		pr_err "Couldn't find bootloader partition"
-		return -1;
-	fi
-
-	riscv64-unknown-elf-objcopy -S -O binary \
-			${BBL_INSTALL_DIR}/bbl ${TMP_DIR}/bbl &>> ${LOGFILE}
-	if [[ $? != 0 ]]; then
-		pr_err "Unable to prepare binary, check out ${LOGFILE}"
-		return -1;
-	fi
-
-	dd if=${TMP_DIR}/bbl of=${1}1 status=progress \
-	   oflag=sync bs=1M &>> ${LOGFILE}
-
-	sync;sync
-	eject ${1}
-
-	cd ${SAVED_PWD}
-}
-
 function flash_bootimg_osbi () {
 	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/fu540-bootimg-flash.log
@@ -140,28 +102,18 @@ function flash_bootimg_osbi () {
 	sync;sync
 	eject ${1}
 
-	cd ${SAVED_PWD}	
+	cd ${SAVED_PWD}
 }
 
 function qemu_test () {
 	local SAVED_PWD=${PWD}
 	local QEMU_INSTALL_DIR=${BINDIR}/riscv-qemu
-	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
 	local OSBI_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi
 	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux
 	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local QEMU=${QEMU_INSTALL_DIR}/bin/qemu-system-riscv${BASE_ISA_XLEN}
-	local BIOS=""
-
-	if [[ ${FSBL_TYPE} == "bbl" ]]; then
-		BIOS=${BBL_INSTALL_DIR}/bbl.bin
-	elif [[ ${FSBL_TYPE} == "osbi" ]]; then
-		BIOS=${OSBI_INSTALL_DIR}/fw_payload.bin
-	else
-		pr_err "Unknown FSBL type"
-		return -2;
-	fi
+	local BIOS=${OSBI_INSTALL_DIR}/fw_payload.bin
 
 	${QEMU} -nographic -machine sifive_u -cpu sifive-u54 \
 		-smp cpus=5,maxcpus=5 -m 4G \
@@ -169,11 +121,6 @@ function qemu_test () {
 
 	cd ${SAVED_PWD}
 	KEEP_LOGS=0
-}
-
-function qemu_test_bbl () {
-	FSBL_TYPE="bbl"
-	qemu_test;
 }
 
 function qemu_test_osbi () {

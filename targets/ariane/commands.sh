@@ -5,14 +5,12 @@ function target_usage () {
 	pr_inf "\nTARGET: ETH Ariane machine"
 	pr_inf "\nariane commands:"
 	pr_inf "\thelp/usage: Print this message"
-	pr_inf "\tbootstrap: (Re)Build unified images (bbl/osbi + Linux + rootfs)"
+	pr_inf "\tbootstrap: (Re)Build unified images (osbi + Linux + rootfs)"
 	pr_inf "\tbuild_ariane_mcs: (Re)Build ariane mcs file"
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
 	pr_inf "\tflash_ariane_mcs: (Re)Flash ariane mcs file to the Genesys2 board"
 	pr_wrn "\t<arg>: Vivado installation directory (the one with settings64.sh)"
 	pr_inf "\tformat_sd: (Re)Format an SD card for booting the board"
-	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
-	pr_inf "\tflash_bootimg_bbl: (Re)Flash boot image based on BBL (bbl + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
 	pr_inf "\tflash_bootimg_osbi: (Re)Flash boot image based on OpenSBI (osbi + Linux + rootfs) (requires root)"
 	pr_wrn "\t<arg>: The target SD card device, e.g. /dev/sdd (check out dmesg / fdisk -l)"
@@ -33,8 +31,8 @@ function target_env_check() {
 
 	# Command filter
 	if [[ "${2}" != "bootstrap" && "${2}" != "build_ariane_mcs" && \
-	      "${2}" != "flash_ariane_mcs" && "${2}" != "flash_bootimg_bbl" && \
-	      "${2}" != "flash_bootimg_osbi" && "${2}" != "format_sd" ]];
+	      "${2}" != "flash_ariane_mcs" && "${2}" != "flash_bootimg_osbi" && \
+	      "${2}" != "format_sd" ]];
 	      then
 		pr_err "Invalid command for ${1}"
 		target_usage
@@ -46,18 +44,14 @@ function target_env_check() {
 
 function target_env_prepare () {
 	TARGET=${1}
-	BBL_WITH_PAYLOAD=0
 	OSBI_PLATFORM="ariane-fpga"
+	OSBI_WITH_PAYLOAD=1
+	KERNEL_EMBED_INITRAMFS=1
 	BASE_ISA=RV64I
-	ABI=imac
 }
 
 function target_bootstrap () {
-	KERNEL_EMBED_INITRAMFS=1
 	build_linux
-	BBL_WITH_PAYLOAD=1
-	build_bbl
-	OSBI_WITH_PAYLOAD=1
 	build_osbi
 }
 
@@ -220,37 +214,6 @@ function format_sd () {
 	fi
 
 	partprobe &>> ${LOGFILE}
-
-	cd ${SAVED_PWD}
-}
-
-function flash_bootimg_bbl () {
-	local SAVED_PWD=${PWD}
-	local LOGFILE=${TMP_DIR}/ariane-bootimg-flash.log
-	local BBL_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-bbl
-	local BOOT_PARTITION=$(fdisk -l | grep ${1} | grep "ONIE boot" | awk '{print $1}')
-	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-
-	pr_inf "Flashing unified boot image (bbl + Linux + initramfs)"
-
-	if [[ ${BOOT_PARTITION} == "" ]]; then
-		pr_err "Couldn't find ONIE boot partition"
-		return -1;
-	fi
-
-	riscv64-unknown-elf-objcopy -S -O binary \
-			${BBL_INSTALL_DIR}/bbl ${TMP_DIR}/bbl &>> ${LOGFILE}
-	if [[ $? != 0 ]]; then
-		pr_err "Unable to prepare binary, check out ${LOGFILE}"
-		return -1;
-	fi
-
-	dd if=${TMP_DIR}/bbl of=${BOOT_PARTITION} status=progress \
-	   oflag=sync bs=1M &>> ${LOGFILE}
-
-	sync;sync
-	eject ${1}
 
 	cd ${SAVED_PWD}
 }
