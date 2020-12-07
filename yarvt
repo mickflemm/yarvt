@@ -28,6 +28,7 @@ INITRAMFS_SKIP_IMAGE=0
 KERNEL_EMBED_INITRAMFS=0
 GIT_CLONE_RECURSIVE=1
 MEM_START=0x0
+FDT_ADDR=0x0
 
 ####################
 # GIT REPOSITORIES #
@@ -700,11 +701,13 @@ function build_osbi () {
 	local GITURL=${OSBI_GITURL}
 	local BUILD_DIR=${SOURCES_DIR}/build
 	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
-	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
 	local CC_PREFIX=riscv64-unknown-elf-
+	local OSBI_MAKE_PARAMS=""
+
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
@@ -725,6 +728,16 @@ function build_osbi () {
 			return -2;
 		fi
 		OSBI_PAYLOAD=${LINUX_INSTALL_DIR}/Image
+		OSBI_MAKE_PARAMS="FW_PAYLOAD=y FW_PAYLOAD_PATH=${OSBI_PAYLOAD}"
+		if [[ ${FDT_ADDR} != 0x0 ]]; then
+			OSBI_MAKE_PARAMS="${OSBI_MAKE_PARAMS} FW_PAYLOAD_FDT_ADDR=${FDT_ADDR}"
+		else
+			OSBI_MAKE_PARAMS="${OSBI_MAKE_PARAMS} FW_PAYLOAD_FDT_ADDR="
+		fi
+	fi
+
+	if [[ ${MEM_START} != 0x0 ]]; then
+		OSBI_MAKE_PARAMS="${OSBI_MAKE_PARAMS} FW_TEXT_START=${MEM_START}"
 	fi
 
 	pr_inf "Checking out OpenSBI sources..."
@@ -740,7 +753,7 @@ function build_osbi () {
 
 	pr_inf "Building OpenSBI..."
 	CROSS_COMPILE=${CC_PREFIX} PLATFORM_RISCV_XLEN=${BASE_ISA_XLEN} \
-	make PLATFORM=${OSBI_PLATFORM} FW_PAYLOAD_PATH=${OSBI_PAYLOAD} \
+	make PLATFORM=${OSBI_PLATFORM} ${OSBI_MAKE_PARAMS} \
 	-j${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tBuild failed, check out ${LOGFILE}..."
