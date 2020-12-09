@@ -134,7 +134,7 @@ function git_clone() {
 	fi
 	if [[ ${2} != "" ]]; then
 		cd ${SOURCES_DIR}
-		git checkout -b snapshot ${2} >> ${LOGFILE}
+		git checkout -b snapshot ${2} &>> ${LOGFILE}
 		pr_dbg "Switching to commit ${2}"
 		cd ${SAVED_PWD}
 	fi
