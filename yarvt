@@ -115,7 +115,8 @@ function git_update() {
 
 function git_clone() {
 	local BRANCH=""
-	local RECURSIVE=""
+	local RECURSIVE_CLONE=""
+	local NON_RECURSIVE_FETCH=""
 	local SAVED_PWD=${PWD}
 	pr_dbg "Cloning ${GITURL} to ${SOURCES_DIR}..."
 	if [[ ${1} != "" ]]; then
@@ -123,24 +124,31 @@ function git_clone() {
 		pr_dbg "Using branch ${1}..."
 	fi
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
-		RECURSIVE="--recursive"
-		pr_dbg "Recursive checkout"
+		RECURSIVE_CLONE="--recursive"
+		pr_dbg "Recursive clone"
+	elif [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
+		NON_RECURSIVE_FETCH="--no-recurse-submodules"
 	fi
+
 	git clone ${RECURSIVE} ${BRANCH} --depth=1 ${GITURL} \
 		-j ${NUM_JOBS} ${SOURCES_DIR} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tGit clone failed, check out ${LOGFILE}"
 		return -1;
 	fi
+
+	# Switch to a specific commit and create a snapshot branch
 	if [[ ${2} != "" ]]; then
 		cd ${SOURCES_DIR}
-		git checkout -b snapshot ${2} &>> ${LOGFILE}
+		git fetch -j ${NUM_JOBS} origin ${NON_RECURSIVE_FETCH} ${2} &>> ${LOGFILE}
+		git checkout -b snapshot -f ${2} &>> ${LOGFILE}
 		pr_dbg "Switching to commit ${2}"
 		cd ${SAVED_PWD}
 	fi
 }
 
 function get_git_sources() {
+	local SAVED_PWD=${PWD}
 	if [[ -d ${SOURCES_DIR} ]]; then
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${SOURCES_DIR}..."
@@ -148,7 +156,9 @@ function get_git_sources() {
 			git_clone ${1} ${2}
 		else
 			if [[ ${2} != "" ]]; then
-				git_update snapshot
+				cd ${SOURCES_DIR}
+				git_cleanup snapshot
+				cd ${SAVED_PWD}
 			else
 				git_update ${1}
 			fi
@@ -159,12 +169,14 @@ function get_git_sources() {
 }
 
 function get_git_submodule () {
+	local SAVED_PWD=${PWD}
 	local RECURSIVE=""
-	local SHALLOW="--depth=10"
+	local SHALLOW="--depth=1"
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
 		RECURSIVE="--recursive"
 		pr_dbg "Recursive checkout"
 	fi
+	cd ${SOURCES_DIR}
 	if [[ -e ${1}/.git ]]; then
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${1}..."
@@ -173,16 +185,19 @@ function get_git_submodule () {
 			SHALLOW=""
 			cd ${1}
 			git_cleanup
-			cd ../
+			cd ${SOURCES_DIR}
 		fi
-	fi;
+	fi
 	pr_dbg "Checking out submodule ${1}"
 	git submodule update --init ${RECURSIVE} -j ${NUM_JOBS} \
 			     ${SHALLOW} ${1} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tSubmodule update failed, check out ${LOGFILE}"
+		cd ${SAVED_PWD}
 		return -1;
 	fi
+	cd ${SAVED_PWD}
+	return 0;
 }
 
 function apply_patches () {
@@ -291,19 +306,17 @@ function build_busybox () {
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
 	local EXTRA_CFLAGS=""
-	local MARCH=""
+	local MARCH=rv${BASE_ISA_XLEN}imafdc
 	local MABI=""
 
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
 		MABI=lp64d
-		MARCH=rv${BASE_ISA_XLEN}imafdc
 	else
-		MABI=ilp32
-		MARCH=rv${BASE_ISA_XLEN}imac
+		MABI=ilp32d
 	fi
 
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -324,9 +337,13 @@ function build_busybox () {
 	    sed s#"INSTALL_DIR"#${INSTALL_DIR}#g | \
 	    sed s#"TARGET_TUPLE"#${TARGET_TUPLE}#g | \
 	    sed s#"CONFIG_EXTRA_CFLAGS=\"\""#"CONFIG_EXTRA_CFLAGS=\"${EXTRA_CFLAGS}\""#g > .config
+	# Busybox's Makefile doesn't pass CFLAGS on its LD command,
+	# needed when using a multilib toolchain, else march/mabi are not preserved
+	sed -i "s#-nostdlib#-nostdlib ${EXTRA_CFLAGS}#" Makefile
 
 	pr_inf "Building BusyBox..."
-	ARCH=riscv make -j${NUM_JOBS} &>> ${LOGFILE}
+	make ARCH=riscv olddefconfig &>> ${LOGFILE}
+	make ARCH=riscv -j${NUM_JOBS} &>> ${LOGFILE}
 	make install &>> ${LOGFILE}
 	if [[ ! -f ${INSTALL_DIR}/bin/busybox ]]; then
 		pr_err "\tBuild failed, check out ${LOGFILE}"
@@ -346,19 +363,17 @@ function build_dropbear () {
 	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
 	local EXTRA_CFLAGS=""
-	local MARCH=""
+	local MARCH=rv${BASE_ISA_XLEN}imafdc
 	local MABI=""
 
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
 		MABI=lp64d
-		MARCH=rv${BASE_ISA_XLEN}imafdc
 	else
-		MABI=ilp32
-		MARCH=rv${BASE_ISA_XLEN}imac
+		MABI=ilp32d
 	fi
 
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -376,7 +391,9 @@ function build_dropbear () {
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
+	# Dropbear's LDFLAGS are actualy CFLAGS (it uses gcc to link)
 	CFLAGS="-O2 ${EXTRA_CFLAGS}" \
+	LDFLAGS="-O2 ${EXTRA_CFLAGS}" \
 	./configure --enable-static --disable-zlib --disable-wtmp \
 		    --prefix=${INSTALL_DIR} \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
@@ -390,6 +407,7 @@ function build_dropbear () {
 	fi
 	cp ${SOURCES_DIR}/dropbearmulti ${INSTALL_DIR}/bin/
 	cd ${INSTALL_DIR}/bin
+	${TARGET_TUPLE}-strip -s dropbearmulti
 	ln -s dropbearmulti dropbear
 	ln -s dropbearmulti ssh
 	ln -s dropbearmulti scp
@@ -436,7 +454,6 @@ function build_toolchain () {
 		return $?;
 	fi
 
-	cd ${SOURCES_DIR}
 	get_git_submodule riscv-binutils
 	if [[ $? != 0 ]]; then
 		return $?;
@@ -476,12 +493,11 @@ function build_toolchain () {
 	else
 		if [[ ${BASE_ISA_XLEN} == 64 ]]; then
 			MABI=lp64d
-			MARCH=rv${BASE_ISA_XLEN}imafdc
 		else
-			MABI=ilp32
-			MARCH=rv${BASE_ISA_XLEN}imac
+			MABI=ilp32d
 		fi
 
+		MARCH=rv${BASE_ISA_XLEN}imafdc
 		TC_OPTS="${TC_OPTS} --with-arch=${MARCH} --with-abi=${MABI}"
 	fi
 
@@ -498,7 +514,7 @@ function build_toolchain () {
 		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
 		if [[ ${TC_TYPE} == "musl32" ]]; then
 			GITURL=https://github.com/riscv/riscv-musl.git
-			MUSL_BRANCH=staging
+			MUSL_BRANCH=develop
 		else
 			GITURL=git://git.musl-libc.org/musl
 			MUSL_BRANCH=master
@@ -705,7 +721,7 @@ function build_osbi () {
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	local CC_PREFIX=riscv64-unknown-elf-
+	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	local OSBI_MAKE_PARAMS=""
 
 	PATH=${PATH}:${TC_INSTALL_DIR}/bin
@@ -807,6 +823,7 @@ function build_rootfs () {
 	cp -p ${SCRIPT_PATH}/files/inittab ./etc/
 	cp -p ${SCRIPT_PATH}/files/udhcpc_handler.sh ./etc/
 	cp -p ${SCRIPT_PATH}/files/motd ./etc/
+	cp -p ${SCRIPT_PATH}/files/extra/* ./bin/ &> /dev/null
 	ln -s ./bin/busybox ./init
 
 	if [[ ${INITRAMFS_SKIP_IMAGE} == 1 ]]; then
@@ -834,7 +851,7 @@ function bootstrap () {
 	else
 		if build_toolchain newlib &&
 		   build_toolchain glibc &&
-#		   build_toolchain musl32 &&
+		   build_toolchain musl32 &&
 		   build_toolchain musl64 &&
 		   build_qemu ; then
 			return 0;
@@ -874,7 +891,7 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
 	return 0
 fi
 
-pr_ann "Yet another RISC-V tool v0.1"
+pr_ann "Yet another RISC-V tool v0.5"
 env_check $@
 
 mkdir -p ${SOURCES} &> /dev/null

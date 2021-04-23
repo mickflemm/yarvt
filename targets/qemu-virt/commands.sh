@@ -6,7 +6,7 @@ function target_usage () {
 	pr_inf "\tbuild_osbi: (Re)Build OpenSBI"
 	pr_inf "\tbuild_linux: (Re)Build a defconfig RISC-V Linux kernel"
 	pr_inf "\tbuild_rootfs: (Re)Build a minimal rootfs on initramfs"
-#	pr_inf "\trun_linux32_osbi: Run a 32bit QEMU instance with osbi+linux+initramfs"
+	pr_inf "\trun_linux32_osbi: Run a 32bit QEMU instance with osbi+linux+initramfs"
 	pr_inf "\trun_linux64_osbi: Run a 64bit QEMU instance with osbi+linux+initramfs"
 }
 
@@ -48,10 +48,10 @@ function target_bootstrap () {
 	build_linux
 	build_rootfs
 	build_osbi
-#	BASE_ISA=RV32I
-#	build_linux
-#	build_rootfs
-#	build_osbi
+	BASE_ISA=RV32I
+	build_linux
+	build_rootfs
+	build_osbi
 }
 
 function run_linux () {
@@ -64,7 +64,7 @@ function run_linux () {
 	local QEMU=${QEMU_INSTALL_DIR}/bin/qemu-system-riscv${BASE_ISA_XLEN}
 	local BIOS=${OSBI_INSTALL_DIR}/fw_jump.elf
 
-	${QEMU} -nographic -machine virt -smp 2 -m 1G \
+	${QEMU} -nographic -machine virt -smp 2 -m 1G -s \
 		-netdev user,id=unet,hostfwd=tcp::2222-:22 \
 		-device virtio-net-device,netdev=unet \
 		-net user \
@@ -78,10 +78,10 @@ function run_linux () {
 	KEEP_LOGS=0
 }
 
-#function run_linux32_osbi () {
-#	BASE_ISA=RV32I
-#	run_linux
-#}
+function run_linux32_osbi () {
+	BASE_ISA=RV32I
+	run_linux
+}
 
 function run_linux64_osbi () {
 	BASE_ISA=RV64I
