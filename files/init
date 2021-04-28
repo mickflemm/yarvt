@@ -8,8 +8,7 @@ mount -t proc -o nodev,noexec,nosuid proc /proc
 mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
 
 # Start mdev
-echo /sbin/mdev > /proc/sys/kernel/hotplug
-/sbin/mdev -s
+/sbin/mdev -d &> /dev/null
 
 # Populate the remaining stuff for rootfs
 mkdir -p /var/log
@@ -37,9 +36,9 @@ chmod go-rw /etc/gshadow
 syslogd
 
 # Initialize loopback interface
-ip link set lo up
-ip addr add 127.0.0.1 dev lo
-ip route add 127.0.0.0/255.0.0.0 dev lo
+ip link set lo up &> /dev/null
+ip addr add 127.0.0.1 dev lo &> /dev/null
+ip route add 127.0.0.0/255.0.0.0 dev lo &> /dev/null
 
 # Print a greeting
 cat /etc/motd > /dev/console
@@ -51,7 +50,7 @@ echo "$(uname -s -v -r -p -m)" > /dev/console
 # the ssh server if available
 ip link show eth0 | grep eth0 &> /dev/null
 if [[ $? == 0 ]]; then
-        ip link set eth0 up
+        ip link set eth0 up &> /dev/null
         udhcpc -b > /dev/console &
 	dropbear -R -b /etc/motd &
 	mkdir -p /usr/bin
