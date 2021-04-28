@@ -25,6 +25,7 @@ WORKDIR=${BINDIR}
 TARGET=""
 TARGET_PATH=""
 INITRAMFS_SKIP_IMAGE=0
+NO_NETWORK=0
 KERNEL_EMBED_INITRAMFS=0
 GIT_CLONE_RECURSIVE=1
 MEM_START=0x0
@@ -43,7 +44,7 @@ OSBI_GITBRANCH=""
 QEMU_GITURL=https://git.qemu.org/git/qemu.git
 QEMU_GITBRANCH="v5.0.0"
 
-BBOX_GITURL=git://busybox.net/busybox.git
+BBOX_GITURL=https://git.busybox.net/busybox.git
 BBOX_GITBRANCH="1_31_stable"
 
 RVGTOOLCHAIN_GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
@@ -694,9 +695,9 @@ function build_linux () {
 		rm vmlinux &>> ${LOGFILE}
 		rm arch/riscv/boot/Image &>> ${LOGFILE}
 		rm arch/riscv/boot/Image.gz &>> ${LOGFILE}
-		fakeroot mknod -m 622 ${ROOTFS_INSTALL_DIR}/dev/console c 5 1 && \
+		fakeroot -i ${TMP_DIR}/frstate -- make \
 		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
-		make -j${NUM_JOBS} &>> ${LOGFILE}
+		-j${NUM_JOBS} &>> ${LOGFILE}
 		if [[ $? != 0 ]]; then
 			pr_err "\tBuild failed, check out ${LOGFILE}..."
 			return -1;
@@ -803,7 +804,7 @@ function build_rootfs () {
 		rm -rf ${INSTALL_DIR}
 	fi
 	mkdir -p ${INSTALL_DIR}/{dev,proc,sys} &>> ${LOGFILE}
-	mkdir -p ${INSTALL_DIR}/{etc,var/run,/lib/firmware} &>> ${LOGFILE}
+	mkdir -p ${INSTALL_DIR}/{root,etc,var/run,/lib/firmware} &>> ${LOGFILE}
 
 	pr_inf "Installing kernel modules..."
 	if [[ ! -f ${LINUX_INSTALL_DIR}/vmlinux ]]; then
@@ -815,7 +816,9 @@ function build_rootfs () {
 
 	build_busybox
 
-	build_dropbear
+	if [[ ${NO_NETWORK} == 0 ]]; then
+		build_dropbear
+	fi
 
 	pr_inf "Adding files and symlinks..."
 	cd ${INSTALL_DIR}
@@ -824,6 +827,7 @@ function build_rootfs () {
 	cp -p ${SCRIPT_PATH}/files/udhcpc_handler.sh ./etc/
 	cp -p ${SCRIPT_PATH}/files/motd ./etc/
 	cp -p ${SCRIPT_PATH}/files/extra/* ./bin/ &> /dev/null
+	fakeroot -s ${TMP_DIR}/frstate mknod -m 622 dev/console c 5 1
 	ln -s ./bin/busybox ./init
 
 	if [[ ${INITRAMFS_SKIP_IMAGE} == 1 ]]; then
@@ -833,8 +837,7 @@ function build_rootfs () {
 	fi
 
 	pr_inf "Creating initramfs image..."
-	fakeroot mknod -m 622 dev/console c 5 1 && \
-	find . -print0 | cpio --null -ov --format=newc > \
+	fakeroot -i ${TMP_DIR}/frstate /bin/bash -c 'find . -print0 | cpio --null -ov --format=newc' > \
 	     ${TMP_DIR}/initramfs.cpio 2>> ${LOGFILE}
 	cd ${TMP_DIR}
 	xz -e -T0 --check=crc32 --lzma2=dict=32MiB \
