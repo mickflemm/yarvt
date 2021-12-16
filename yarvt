@@ -232,7 +232,7 @@ function build_busybox () {
 		MABI=ilp32
 	fi
 
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 	MARCH=rv${BASE_ISA_XLEN}imac
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
@@ -286,7 +286,7 @@ function build_dropbear () {
 		MABI=ilp32
 	fi
 
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 	MARCH=rv${BASE_ISA_XLEN}imac
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI}"
 
@@ -468,7 +468,7 @@ function build_linux () {
 	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
 	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 
 	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
 		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA} with built-in initramfs"
@@ -580,7 +580,7 @@ function build_bbl () {
 	local PAYLOAD=${LINUX_INSTALL_DIR}/vmlinux
 	local BBL_OPTS=""
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 
 	pr_ann "Berkeley Boot Loader for ${TARGET}/${BASE_ISA}"
 
@@ -661,7 +661,7 @@ function build_osbi () {
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
 
@@ -788,7 +788,7 @@ function setup_env () {
 	local TC_MUSL64_PATH=${BINDIR}/riscv-musl64-toolchain/bin
 	local TC_MUSL_PATHS=${TC_MUSL32_PATH}:${TC_MUSL64_PATH}
 	local ALL_TC_PATHS=${TC_NEWLIB_PATH}:${TC_GLIBC_PATH}:${TC_MUSL_PATHS}
-	export PATH=${PATH}:${ALL_TC_PATHS}
+	export PATH=${ALL_TC_PATHS}:${PATH}
 }
 
 function cleanup () {
