@@ -316,7 +316,7 @@ function build_busybox () {
 		MABI=ilp32d
 	fi
 
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
@@ -373,7 +373,7 @@ function build_dropbear () {
 		MABI=ilp32d
 	fi
 
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
@@ -610,7 +610,7 @@ function build_linux () {
 	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
 	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 
 	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
 		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA} with built-in initramfs"
@@ -725,7 +725,7 @@ function build_osbi () {
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	local OSBI_MAKE_PARAMS=""
 
-	PATH=${PATH}:${TC_INSTALL_DIR}/bin
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
 
@@ -872,7 +872,7 @@ function setup_env () {
 	local TC_MUSL_PATHS=${TC_MUSL32_PATH}:${TC_MUSL64_PATH}
 	local ALL_TC_PATHS=${TC_NEWLIB_PATH}:${TC_GLIBC_PATH}:${TC_MUSL_PATHS}
 	local QEMU_PATH=${BINDIR}/riscv-qemu/bin
-	export PATH=${PATH}:${ALL_TC_PATHS}:${QEMU_PATH}
+	export PATH=${ALL_TC_PATHS}:${QEMU_PATH}:${PATH}
 }
 
 function cleanup () {
