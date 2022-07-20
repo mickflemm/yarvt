@@ -691,7 +691,7 @@ function build_linux () {
 		echo "CONFIG_INITRAMFS_SOURCE=\"${ROOTFS_INSTALL_DIR}\"" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION_XZ=y" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION=\".xz\"" >> .config
-		ARCH=riscv make olddefconfig &>> ${LOGFILE}
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} make olddefconfig &>> ${LOGFILE}
 		rm vmlinux &>> ${LOGFILE}
 		rm arch/riscv/boot/Image &>> ${LOGFILE}
 		rm arch/riscv/boot/Image.gz &>> ${LOGFILE}
