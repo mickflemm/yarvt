@@ -661,7 +661,8 @@ function build_linux () {
 	# should handle dependencies apropriately
 	if [[ ${BASE_ISA} == "RV32I" ]]; then
 		sed -i s#CONFIG_ARCH_RV64I#CONFIG_ARCH_RV32I#g .config
-		ARCH=riscv make olddefconfig &>> ${LOGFILE}
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+		make olddefconfig &>> ${LOGFILE}
 	fi
 
 	pr_inf "Building Linux kernel..."
@@ -691,7 +692,8 @@ function build_linux () {
 		echo "CONFIG_INITRAMFS_SOURCE=\"${ROOTFS_INSTALL_DIR}\"" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION_XZ=y" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION=\".xz\"" >> .config
-		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} make olddefconfig &>> ${LOGFILE}
+		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
+		make olddefconfig &>> ${LOGFILE}
 		rm vmlinux &>> ${LOGFILE}
 		rm arch/riscv/boot/Image &>> ${LOGFILE}
 		rm arch/riscv/boot/Image.gz &>> ${LOGFILE}
