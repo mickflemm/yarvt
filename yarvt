@@ -41,15 +41,15 @@ LINUX_KERNEL_GITBRANCH="fixes"
 OSBI_GITURL=https://github.com/riscv/opensbi.git
 OSBI_GITBRANCH=""
 
-QEMU_GITURL=https://git.qemu.org/git/qemu.git
-QEMU_GITBRANCH="v5.0.0"
+QEMU_GITURL=https://gitlab.com/qemu-project/qemu.git
+QEMU_GITBRANCH="v7.0.0"
 
 BBOX_GITURL=https://git.busybox.net/busybox.git
-BBOX_GITBRANCH="1_31_stable"
+BBOX_GITBRANCH="1_35_stable"
 
-RVGTOOLCHAIN_GITURL=https://github.com/riscv/riscv-gnu-toolchain.git
+RVGTOOLCHAIN_GITURL=https://github.com/riscv-collab/riscv-gnu-toolchain.git
 RVGTOOLCHAIN_GITBRANCH="master"
-RVGTOOLCHAIN_GITCOMMIT="168878203fa440a799b3c502af2a5b7f0f0eed7e"
+RVGTOOLCHAIN_GITCOMMIT="409b951ba6621f2f115aebddfb15ce2dd78ec24f"
 
 ##################
 # CONSOLE OUTPUT #
@@ -314,10 +314,14 @@ function build_busybox () {
 		MABI=lp64d
 	else
 		MABI=ilp32d
+		# Musl doesn't support 32bit support for now
+		# fallback to using glibc-based toolchain (will result larger binaries)
+		TARGET_TUPLE=riscv64-unknown-linux-gnu-
+		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	fi
 
 	PATH=${TC_INSTALL_DIR}/bin:${PATH}
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -fuse-linker-plugin  -ffat-lto-objects"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -371,10 +375,14 @@ function build_dropbear () {
 		MABI=lp64d
 	else
 		MABI=ilp32d
+		# Musl doesn't support 32bit support for now
+		# fallback to using glibc-based toolchain (will result larger binaries)
+		TARGET_TUPLE=riscv64-unknown-linux-gnu
+		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	fi
 
 	PATH=${TC_INSTALL_DIR}/bin:${PATH}
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany"
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -fuse-linker-plugin -ffat-lto-objects"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -396,6 +404,7 @@ function build_dropbear () {
 	CFLAGS="-O2 ${EXTRA_CFLAGS}" \
 	LDFLAGS="-O2 ${EXTRA_CFLAGS}" \
 	./configure --enable-static --disable-zlib --disable-wtmp \
+		    --disable-wtmpx --disable-lastlog --disable-harden \
 		    --prefix=${INSTALL_DIR} \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
 
@@ -470,15 +479,23 @@ function build_toolchain () {
 		return $?;
 	fi
 
+
 	if [[ ${TC_TYPE} == "glibc" ]]; then
-		get_git_submodule riscv-glibc
+		get_git_submodule glibc
 		if [[ $? != 0 ]]; then
 			return $?;
 		fi
 	fi
 
 	if [[ ${TC_TYPE} == "newlib" ]]; then
-		get_git_submodule riscv-newlib
+		get_git_submodule newlib
+		if [[ $? != 0 ]]; then
+			return $?;
+		fi
+	fi
+
+	if [[ ${TC_TYPE} == "musl64" || ${TC_TYPE} == "musl32" ]]; then
+		get_git_submodule musl
 		if [[ $? != 0 ]]; then
 			return $?;
 		fi
@@ -504,31 +521,10 @@ function build_toolchain () {
 
 	if [[ ${TC_TYPE} == "glibc" ]]; then
 		TC_MKTARGET="linux"
+	elif [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
+		TC_MKTARGET="musl"
 	else
 		TC_MKTARGET=${TC_TYPE}
-	fi
-
-	# Musl is not included on riscv-gnu-toolchain repository
-	# download it inside for now, until it becomes a submodule
-	# like the rest.
-	if [[ ${TC_TYPE} == "musl32" || ${TC_TYPE} == "musl64" ]]; then
-		SOURCES_DIR=${SOURCES_DIR}/riscv-musl
-		if [[ ${TC_TYPE} == "musl32" ]]; then
-			GITURL=https://github.com/riscv/riscv-musl.git
-			MUSL_BRANCH=develop
-		else
-			GITURL=git://git.musl-libc.org/musl
-			MUSL_BRANCH=master
-		fi
-		# Clear sources when switching branches
-		CLEAR_SOURCES=1
-		get_git_sources ${MUSL_BRANCH}
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
-		CLEAR_SOURCES=${SAVED_CLEAR_SOURCES}
-		SOURCES_DIR=${SOURCES}/riscv-toolchains
-		TC_MKTARGET="musl"
 	fi
 
 	pr_inf "Configuring toolchain sources for ${TC_TYPE}..."
@@ -856,7 +852,7 @@ function bootstrap () {
 	else
 		if build_toolchain newlib &&
 		   build_toolchain glibc &&
-		   build_toolchain musl32 &&
+#		   build_toolchain musl32 &&
 		   build_toolchain musl64 &&
 		   build_qemu ; then
 			return 0;
