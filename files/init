@@ -7,10 +7,8 @@ mount -t devpts devpts /dev/pts
 mount -t proc -o nodev,noexec,nosuid proc /proc
 mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
 
-# Start mdev
-/sbin/mdev -d &> /dev/null
-
 # Populate the remaining stuff for rootfs
+mkdir /tmp
 mkdir -p /var/log
 touch /var/log/wtmp
 mkdir -p /var/run
@@ -35,6 +33,9 @@ chmod go-rw /etc/gshadow
 # Start syslogd
 syslogd
 
+# Start mdev
+/sbin/mdev -d &> /dev/null
+
 # Initialize loopback interface
 ip link set lo up &> /dev/null
 ip addr add 127.0.0.1 dev lo &> /dev/null
@@ -42,6 +43,9 @@ ip route add 127.0.0.0/255.0.0.0 dev lo &> /dev/null
 
 # Print a greeting
 cat /etc/motd > /dev/console
+
+# Disable kernel log output on console
+dmesg -n1
 
 echo -e "\t\tWelcome to RISC-V !" > /dev/console
 echo "$(uname -s -v -r -p -m)" > /dev/console
@@ -51,7 +55,7 @@ echo "$(uname -s -v -r -p -m)" > /dev/console
 ip link show eth0 | grep eth0 &> /dev/null
 if [[ $? == 0 ]]; then
         ip link set eth0 up &> /dev/null
-        udhcpc -b > /dev/console &
+        udhcpc -b -S -R &> /dev/null &
 	dropbear -R -b /etc/motd &
 	mkdir -p /usr/bin
 	ln -s /bin/dropbearmulti /usr/bin/dbclient

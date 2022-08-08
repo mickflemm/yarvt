@@ -425,6 +425,67 @@ function build_dropbear () {
 	cd ${SAVED_PWD}
 }
 
+function build_iperf () {
+	local SAVED_PWD=${PWD}
+	local LOGFILE=${TMP_DIR}/iperf.log
+	local SOURCES_DIR=${SOURCES}/iperf
+	local GITURL=https://github.com/esnet/iperf.git
+	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
+	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
+	local EXTRA_CFLAGS=""
+	local MARCH=rv${BASE_ISA_XLEN}imafdc
+	local MABI=""
+
+	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
+		MABI=lp64d
+	else
+		MABI=ilp32d
+		# Musl doesn't support 32bit support for now
+		# fallback to using glibc-based toolchain (will result larger binaries)
+		TARGET_TUPLE=riscv64-unknown-linux-gnu
+		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+	fi
+
+	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -fuse-linker-plugin -ffat-lto-objects"
+
+	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
+		pr_err "Toolchain not present, did you run bootstrap ?"
+		return -1;
+	fi
+
+	pr_inf "Checking out iperf3 sources..."
+	get_git_sources
+	if [[ $? != 0 ]]; then
+		return $?;
+	fi
+
+	pr_inf "Configuring iperf3..."
+	cd ${SOURCES_DIR}
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
+	autoreconf -ivf &>> ${LOGFILE}
+	CFLAGS="-O2 ${EXTRA_CFLAGS}" \
+	LDFLAGS="-flto -fuse-linker-plugin -ffat-lto-objects"
+	./configure --enable-static-bin --without-sctp --with-openssl=no \
+		    --prefix=${INSTALL_DIR} \
+		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
+
+	pr_inf "Building iperf3..."
+	make -j${NUM_JOBS} &>> ${LOGFILE}
+	if [[ ! -f ${SOURCES_DIR}/src/iperf3 ]]; then
+		pr_err "\tBuild failed, check out ${LOGFILE}"
+		return -1;
+	fi
+	cp ${SOURCES_DIR}/src/iperf3 ${INSTALL_DIR}/bin/
+	cd ${INSTALL_DIR}/bin
+	${TARGET_TUPLE}-strip -s iperf3
+
+	cd ${SAVED_PWD}
+}
+
 
 ######################
 # BOOTSTRAP COMMANDS #
@@ -816,6 +877,7 @@ function build_rootfs () {
 
 	if [[ ${NO_NETWORK} == 0 ]]; then
 		build_dropbear
+		build_iperf
 	fi
 
 	pr_inf "Adding files and symlinks..."
