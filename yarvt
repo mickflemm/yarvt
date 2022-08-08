@@ -719,7 +719,7 @@ function build_osbi () {
 	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-	local TC_INSTALL_DIR=${BINDIR}/riscv-newlib-toolchain
+	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	local OSBI_MAKE_PARAMS=""
 
