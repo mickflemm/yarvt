@@ -321,7 +321,7 @@ function build_busybox () {
 	fi
 
 	PATH=${TC_INSTALL_DIR}/bin:${PATH}
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -ffat-lto-objects"
+	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -382,7 +382,7 @@ function build_dropbear () {
 	fi
 
 	PATH=${TC_INSTALL_DIR}/bin:${PATH}
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -ffat-lto-objects"
+	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -401,8 +401,8 @@ function build_dropbear () {
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
 	# Dropbear's LDFLAGS are actualy CFLAGS (it uses gcc to link)
-	CFLAGS="-Os ${EXTRA_CFLAGS}" \
-	LDFLAGS="${EXTRA_CFLAGS}" \
+	CFLAGS="${EXTRA_CFLAGS} -ffunction-sections -fdata-sections" \
+	LDFLAGS="${EXTRA_CFLAGS} -Wl,--gc-sections" \
 	./configure --enable-static --disable-zlib --disable-wtmp \
 		    --disable-wtmpx --disable-lastlog --disable-harden \
 		    --prefix=${INSTALL_DIR} \
@@ -449,7 +449,7 @@ function build_iperf () {
 	fi
 
 	PATH=${TC_INSTALL_DIR}/bin:${PATH}
-	EXTRA_CFLAGS="-march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto -ffat-lto-objects"
+	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
 	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
 		pr_err "Toolchain not present, did you run bootstrap ?"
@@ -467,8 +467,8 @@ function build_iperf () {
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
-	CFLAGS="-Os ${EXTRA_CFLAGS}" \
-	LDFLAGS="${EXTRA_CFLAGS}" \
+	CFLAGS="${EXTRA_CFLAGS} -ffunction-sections -fdata-sections" \
+	LDFLAGS="${EXTRA_CFLAGS} -Wl,--gc-sections" \
 	./configure --enable-static-bin --without-sctp --with-openssl=no \
 		    --prefix=${INSTALL_DIR} \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
