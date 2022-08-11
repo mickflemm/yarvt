@@ -31,7 +31,7 @@ echo "root:*::" > /etc/gshadow
 chmod go-rw /etc/gshadow
 
 # Start syslogd
-syslogd
+syslogd -C1024
 
 # Start mdev
 /sbin/mdev -d &> /dev/null
@@ -54,9 +54,16 @@ echo "$(uname -s -v -r -p -m)" > /dev/console
 # the ssh server if available
 ip link show eth0 | grep eth0 &> /dev/null
 if [[ $? == 0 ]]; then
-        ip link set eth0 up &> /dev/null
-        udhcpc -b -S -R &> /dev/null &
-	dropbear -R -b /etc/motd &
+	# Check if we already have an IP address due to
+	# kernel-level autoconfiguration
+	ip addr show dev eth0 | grep "inet " &> /dev/null
+	if [[ $? != 0 ]]; then
+		# If not bring up the interface and fire up
+		# the DHCP client
+		ip link set eth0 up &> /dev/null
+		udhcpc -b -S -R &> /dev/null &
+	fi
+	dropbear -R -m -b /etc/motd &
 	mkdir -p /usr/bin
 	ln -s /bin/dropbearmulti /usr/bin/dbclient
 	ntpd &
