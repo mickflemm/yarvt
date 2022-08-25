@@ -49,7 +49,7 @@ BBOX_GITBRANCH="1_35_stable"
 
 RVGTOOLCHAIN_GITURL=https://github.com/riscv-collab/riscv-gnu-toolchain.git
 RVGTOOLCHAIN_GITBRANCH="master"
-RVGTOOLCHAIN_GITCOMMIT="409b951ba6621f2f115aebddfb15ce2dd78ec24f"
+RVGTOOLCHAIN_GITCOMMIT="c39061968972ac2e4a10844aa54b90c8fb94125e"
 
 ##################
 # CONSOLE OUTPUT #
@@ -107,6 +107,7 @@ function git_update() {
 		pr_err "\Git pull failed, check out ${LOGFILE}"
 		return -1;
 	fi
+	git submodule sync &>> ${LOGFILE}
 	git submodule update -j ${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\Git submodules update failed, check out ${LOGFILE}"
@@ -127,7 +128,7 @@ function git_clone() {
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
 		RECURSIVE_CLONE="--recursive"
 		pr_dbg "Recursive clone"
-	elif [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
+	elif [[ ${GIT_CLONE_RECURSIVE} == 0 ]]; then
 		NON_RECURSIVE_FETCH="--no-recurse-submodules"
 	fi
 
@@ -172,7 +173,8 @@ function get_git_sources() {
 function get_git_submodule () {
 	local SAVED_PWD=${PWD}
 	local RECURSIVE=""
-	local SHALLOW="--depth=1"
+	local SHALLOW="--recommend-shallow"
+	local SUBMODULE_NAME=""
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
 		RECURSIVE="--recursive"
 		pr_dbg "Recursive checkout"
@@ -189,9 +191,10 @@ function get_git_submodule () {
 			cd ${SOURCES_DIR}
 		fi
 	fi
-	pr_dbg "Checking out submodule ${1}"
-	git submodule update --init ${RECURSIVE} -j ${NUM_JOBS} \
-			     ${SHALLOW} ${1} &>> ${LOGFILE}
+	SUBMODULE_NAME=$(git submodule | grep ${1} | awk '{print $2}')
+	pr_dbg "Checking out submodule ${SUBMODULE_NAME}"
+	git submodule update --init ${RECURSIVE} ${SHALLOW} \
+			${SUBMODULE_NAME} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
 		pr_err "\tSubmodule update failed, check out ${LOGFILE}"
 		cd ${SAVED_PWD}
@@ -525,17 +528,17 @@ function build_toolchain () {
 		return $?;
 	fi
 
-	get_git_submodule riscv-binutils
+	get_git_submodule binutils
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
 
-	get_git_submodule riscv-gcc
+	get_git_submodule gcc
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
 
-	get_git_submodule riscv-gdb
+	get_git_submodule gdb
 	if [[ $? != 0 ]]; then
 		return $?;
 	fi
@@ -959,6 +962,9 @@ env_check $@
 
 mkdir -p ${SOURCES} &> /dev/null
 mkdir -p ${WORKDIR} &> /dev/null
+
+# Cleanup previous tmpdirs
+rm -rf /tmp/${SCRIPT_NAME}_*
 mkdir -p ${TMP_DIR} &> /dev/null
 
 if [[ ${TARGET} !=  "" ]];then
