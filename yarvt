@@ -5,11 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 SCRIPT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SCRIPT=$(readlink -f ${BASH_SOURCE[0]})
-SCRIPT_NAME=$(basename ${SCRIPT})
-BINDIR=${SCRIPT_PATH}/build
-SOURCES=${SCRIPT_PATH}/sources
-TMP_DIR=/tmp/${SCRIPT_NAME}_$$
+SCRIPT=$(readlink -f "${BASH_SOURCE[0]}")
+SCRIPT_NAME=$(basename "${SCRIPT}")
+SAVED_PWD="${PWD}"
+BINDIR="${SCRIPT_PATH}"/build
+SOURCES="${SCRIPT_PATH}"/sources
+TMP_DIR=/tmp/"${SCRIPT_NAME}"_$$
 NUM_JOBS=$(nproc)
 : ${DEBUG:=1}
 : ${CLEAR_SOURCES:=0}
@@ -21,7 +22,7 @@ fi
 BASE_ISA=RV64I
 OSBI_WITH_PAYLOAD=0
 OSBI_PLATFORM=""
-WORKDIR=${BINDIR}
+WORKDIR="${BINDIR}"
 TARGET=""
 TARGET_PATH=""
 INITRAMFS_SKIP_IMAGE=0
@@ -30,6 +31,19 @@ KERNEL_EMBED_INITRAMFS=0
 GIT_CLONE_RECURSIVE=1
 MEM_START=0x0
 FDT_ADDR=0x0
+
+###############
+# ERROR CODES #
+###############
+E_INVAL=1
+E_GIT=2
+E_PATCH=3
+E_BUILD=4
+E_CONFIG=5
+E_INSTALL=6
+E_NOTC=7
+E_NOKERNEL=8
+E_SIGINT=9
 
 ####################
 # GIT REPOSITORIES #
@@ -64,7 +78,7 @@ function pr_inf () {
 }
 
 function pr_dbg () {
-	if [[ $DEBUG ]]; then
+	if [[ ${DEBUG} ]]; then
 		echo -e "\e[35m\t${1}\e[0m"
 	fi
 }
@@ -83,35 +97,52 @@ function pr_err () {
 # HELPERS #
 ###########
 
+function die () {
+	if [[ ${2} == 0 ]]; then
+		pr_inf "${1}"
+	else
+		pr_err "${1}"
+	fi
+	if [[ ${KEEP_LOGS} == 1 ]];then
+		pr_inf "Checkout logs at ${TMP_DIR}"
+	else
+		rm -rf "${TMP_DIR}" &> /dev/null
+	fi
+	cd "${SAVED_PWD}"
+	exit ${2}
+}
+
+function interrupt () {
+	die "Yarvt interrupted !" ${E_SIGINT}
+}
+
 function git_cleanup () {
+	# Note: ${1} can be empty
 	git checkout -f ${1} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\Git checkout failed, check out ${LOGFILE}"
-		return -1;
+		die "Git checkout failed, check out ${LOGFILE}" ${E_GIT}
 	fi
 
 	# Clean up untracked files
 	for i in $(git status -u -s | awk '{print $2}'); do
-		rm -f ${i} &>> ${LOGFILE}
+		rm -f "${i}" &>> ${LOGFILE}
 	done
 }
 
 function git_update() {
 	pr_dbg "Updating ${SOURCES_DIR}..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 
-	git_cleanup ${1}
+	git_cleanup "${1}"
 
 	git pull &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\Git pull failed, check out ${LOGFILE}"
-		return -1;
+		die "Git pull failed, check out ${LOGFILE}" ${E_GIT}
 	fi
 	git submodule sync &>> ${LOGFILE}
 	git submodule update -j ${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\Git submodules update failed, check out ${LOGFILE}"
-		return -1;
+		die "Git submodules update failed, check out ${LOGFILE}" ${E_GIT}
 	fi
 }
 
@@ -119,9 +150,8 @@ function git_clone() {
 	local BRANCH=""
 	local RECURSIVE_CLONE=""
 	local NON_RECURSIVE_FETCH=""
-	local SAVED_PWD=${PWD}
 	pr_dbg "Cloning ${GITURL} to ${SOURCES_DIR}..."
-	if [[ ${1} != "" ]]; then
+	if [[ "${1}" != "" ]]; then
 		BRANCH="-b ${1}"
 		pr_dbg "Using branch ${1}..."
 	fi
@@ -132,108 +162,102 @@ function git_clone() {
 		NON_RECURSIVE_FETCH="--no-recurse-submodules"
 	fi
 
-	git clone ${RECURSIVE} ${BRANCH} --depth=1 ${GITURL} \
-		-j ${NUM_JOBS} ${SOURCES_DIR} &>> ${LOGFILE}
+	git clone ${RECURSIVE_CLONE} ${BRANCH} --depth=1 ${GITURL} \
+		-j ${NUM_JOBS} "${SOURCES_DIR}" &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tGit clone failed, check out ${LOGFILE}"
-		return -1;
+		die "\tGit clone failed, check out ${LOGFILE}" ${E_GIT}
 	fi
 
 	# Switch to a specific commit and create a snapshot branch
-	if [[ ${2} != "" ]]; then
-		cd ${SOURCES_DIR}
-		git fetch -j ${NUM_JOBS} origin ${NON_RECURSIVE_FETCH} ${2} &>> ${LOGFILE}
-		git checkout -b snapshot -f ${2} &>> ${LOGFILE}
+	if [[ "${2}" != "" ]]; then
+		cd "${SOURCES_DIR}"
+		git fetch -j ${NUM_JOBS} origin ${NON_RECURSIVE_FETCH} "${2}" &>> ${LOGFILE}
+		git checkout -b snapshot -f "${2}" &>> ${LOGFILE}
 		pr_dbg "Switching to commit ${2}"
-		cd ${SAVED_PWD}
+		cd "${SAVED_PWD}"
 	fi
 }
 
 function get_git_sources() {
-	local SAVED_PWD=${PWD}
-	if [[ -d ${SOURCES_DIR} ]]; then
+	if [[ -d "${SOURCES_DIR}" ]]; then
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${SOURCES_DIR}..."
-			rm -rf ${SOURCES_DIR} &>> ${LOGFILE}
-			git_clone ${1} ${2}
+			rm -rf "${SOURCES_DIR}" &>> ${LOGFILE}
+			git_clone "${1}" "${2}"
 		else
-			if [[ ${2} != "" ]]; then
-				cd ${SOURCES_DIR}
+			if [[ "${2}" != "" ]]; then
+				cd "${SOURCES_DIR}"
 				git_cleanup snapshot
-				cd ${SAVED_PWD}
+				cd "${SAVED_PWD}"
 			else
-				git_update ${1}
+				git_update "${1}"
 			fi
 		fi
 	else
-		git_clone ${1} ${2}
+		git_clone "${1}" "${2}"
 	fi
 }
 
 function get_git_submodule () {
-	local SAVED_PWD=${PWD}
 	local RECURSIVE=""
 	local SHALLOW="--recommend-shallow"
 	local SUBMODULE_NAME=""
+	local SUBMODULE_PATH=""
 	if [[ ${GIT_CLONE_RECURSIVE} == 1 ]]; then
 		RECURSIVE="--recursive"
 		pr_dbg "Recursive checkout"
 	fi
-	cd ${SOURCES_DIR}
-	if [[ -e ${1}/.git ]]; then
+	cd "${SOURCES_DIR}"
+	SUBMODULE_NAME=$(git submodule | grep "${1}" | awk '{print $2}')
+	SUBMODULE_PATH=$(git config --file .gitmodules --get-regexp path |\
+			 grep ${SUBMODULE_NAME} | awk '{print $2}')
+	if [[ -e "${SUBMODULE_PATH}"/.git ]]; then
 		if [[ ${CLEAR_SOURCES} == 1 ]]; then
 			pr_dbg "Cleaning up ${1}..."
-			rm -rf ${1} &>> ${LOGFILE}
+			rm -rf "${SUBMODULE_PATH}"/* &>> ${LOGFILE}
 		else
 			SHALLOW=""
-			cd ${1}
+			cd "${SUBMODULE_PATH}"
 			git_cleanup
-			cd ${SOURCES_DIR}
+			cd "${SOURCES_DIR}"
 		fi
 	fi
-	SUBMODULE_NAME=$(git submodule | grep ${1} | awk '{print $2}')
 	pr_dbg "Checking out submodule ${SUBMODULE_NAME}"
 	git submodule update --init ${RECURSIVE} ${SHALLOW} \
 			${SUBMODULE_NAME} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tSubmodule update failed, check out ${LOGFILE}"
-		cd ${SAVED_PWD}
-		return -1;
+		die "\tSubmodule update failed, check out ${LOGFILE}" ${E_GIT}
 	fi
-	cd ${SAVED_PWD}
-	return 0;
+	cd "${SAVED_PWD}"
 }
 
 function apply_patches () {
-        local IFS=$'\n'
-        local PATCHLOGFILE=${TMP_DIR}/patch.log
-        local PATCHLIST=$(ls ${TARGET_PATH}/patches/${1}*.patch 2> /dev/null)
+	local IFS=$'\n'
+	local PATCHLOGFILE=${TMP_DIR}/patch.log
+	local PATCHLIST=$(ls "${TARGET_PATH}"/patches/"${1}"*.patch 2> /dev/null)
 
-        for i in ${PATCHLIST}; do
-                pr_dbg "Applying ${i}..."
-                patch -p0 < ${i} &>> ${PATCHLOGFILE}
-                if [[ $? != 0 ]]; then
-                        pr_err "Patching failed, check out ${PATCHLOGFILE}"
-                        exit -3
-                fi
-        done
+	for i in ${PATCHLIST}; do
+		pr_dbg "Applying ${i}..."
+		patch -p0 < "${i}" &>> ${PATCHLOGFILE}
+		if [[ $? != 0 ]]; then
+			die  "Patching failed, check out ${PATCHLOGFILE}" ${E_PATCH}
+		fi
+	done
 
-	PATCHLIST=$(ls ${TARGET_PATH}/patches/${1}*.sh 2> /dev/null)
-        for i in ${PATCHLIST}; do
-                pr_dbg "Applying ${i}..."
-                source ${i} &>> ${PATCHLOGFILE}
-                if [[ $? != 0 ]]; then
-                        pr_err "Patching failed, check out ${PATCHLOGFILE}"
-                        exit -3
-                fi
-        done
-
-	rm ${PATCHLOGFILE} &> /dev/null
+	PATCHLIST=$(ls "${TARGET_PATH}"/patches/"${1}"*.sh 2> /dev/null)
+	for i in ${PATCHLIST}; do
+		pr_dbg "Applying ${i}..."
+		source "${i}" &>> ${PATCHLOGFILE}
+		if [[ $? != 0 ]]; then
+			die "Patching failed, check out ${PATCHLOGFILE}" ${E_PATCH}
+		fi
+	done
+	rm "${PATCHLOGFILE}" &> /dev/null
 }
 
 function list_targets () {
 	pr_inf "\nAvailable targets:"
-	for i in $(ls ${SCRIPT_PATH}/targets | grep -v common); do
+	for i in $(ls "${SCRIPT_PATH}"/targets | grep -v common); do
 		pr_inf "\t${i}"
 	done
 }
@@ -261,12 +285,13 @@ function usage () {
 
 function env_check() {
 
-	if [[ $# < 1 || $# > 3 ]]; then
+	if [[ $# -lt 1 || $# -gt 3 ]]; then
+		pr_err "Invalid number of arguments"
 		usage
-		exit -1;
+		exit ${E_INVAL};
 	fi
 
-	if [[ ${1} == "usage" || ${1} == "help" ]]; then
+	if [[ "${1}" == "usage" || "${1}" == "help" ]]; then
 		usage
 		exit 0;
 	fi
@@ -276,22 +301,21 @@ function env_check() {
 	      "${1}" != "bootstrap" && "${1}" != "cleanup" ]]; then
 
 		# Check if we got a command for a specific target
-		if [[ -d ${SCRIPT_PATH}/targets/${1} ]]; then
-			TARGET_PATH=${SCRIPT_PATH}/targets/${1}
-			source ${TARGET_PATH}/commands.sh
-			target_env_check $@
-			target_env_prepare $@
-			WORKDIR=${BINDIR}/${TARGET}
+		if [[ -d "${SCRIPT_PATH}"/targets/"${1}" ]]; then
+			TARGET_PATH="${SCRIPT_PATH}"/targets/"${1}"
+			source "${TARGET_PATH}"/commands.sh
+			target_env_check "$@"
+			target_env_prepare "$@"
+			WORKDIR="${BINDIR}/${TARGET}"
 		else
 			pr_err "Invalid command"
 			usage
-			exit -1;
+			exit ${E_INVAL};
 		fi
 	fi
 
 	if [[ ${BASE_ISA} != "RV32I" && ${BASE_ISA} != "RV64I" ]]; then
-		pr_err "Invalid BASE_ISA parameter"
-		exit -1;
+		die "Invalid BASE_ISA parameter" ${E_INVAL}
 	fi
 }
 
@@ -301,13 +325,12 @@ function env_check() {
 ##################
 
 function build_busybox () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/bb.log
-	local SOURCES_DIR=${SOURCES}/busybox
+	local SOURCES_DIR="${SOURCES}"/busybox
 	local GITURL=${BBOX_GITURL}
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TC_INSTALL_DIR="${BINDIR}"/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl-
 	local EXTRA_CFLAGS=""
 	local MARCH=rv${BASE_ISA_XLEN}imafdc
@@ -320,30 +343,26 @@ function build_busybox () {
 		# Musl doesn't support 32bit support for now
 		# fallback to using glibc-based toolchain (will result larger binaries)
 		TARGET_TUPLE=riscv64-unknown-linux-gnu-
-		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+		TC_INSTALL_DIR="${BINDIR}"/riscv-glibc-toolchain
 	fi
 
-	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
+	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
+		die "Toolchain not present, did you run bootstrap ?" ${E_NOTC}
 	fi
 
 	pr_inf "Checking out BusyBox sources..."
 	get_git_sources ${BBOX_GITBRANCH}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	pr_inf "Configuring BusyBox..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
-	cat ${SCRIPT_PATH}/files/busybox | \
-	    sed s#"INSTALL_DIR"#${INSTALL_DIR}#g | \
-	    sed s#"TARGET_TUPLE"#${TARGET_TUPLE}#g | \
+	cat "${SCRIPT_PATH}"/files/busybox | \
+	    sed s#"INSTALL_DIR"#"${INSTALL_DIR}"#g | \
+	    sed s#"TARGET_TUPLE"#"${TARGET_TUPLE}"#g | \
 	    sed s#"CONFIG_EXTRA_CFLAGS=\"\""#"CONFIG_EXTRA_CFLAGS=\"${EXTRA_CFLAGS}\""#g > .config
 	# Busybox's Makefile doesn't pass CFLAGS on its LD command,
 	# needed when using a multilib toolchain, else march/mabi are not preserved
@@ -353,22 +372,20 @@ function build_busybox () {
 	make ARCH=riscv olddefconfig &>> ${LOGFILE}
 	make ARCH=riscv -j${NUM_JOBS} &>> ${LOGFILE}
 	make install &>> ${LOGFILE}
-	if [[ ! -f ${INSTALL_DIR}/bin/busybox ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}"
-		return -1;
+	if [[ ! -f "${INSTALL_DIR}"/bin/busybox ]]; then
+		die "\tBuild failed, check out ${LOGFILE}" ${E_BUILD}
 	fi
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function build_dropbear () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/dbear.log
-	local SOURCES_DIR=${SOURCES}/dropbear
+	local SOURCES_DIR="${SOURCES}"/dropbear
 	local GITURL=https://github.com/mkj/dropbear.git
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TC_INSTALL_DIR="${BINDIR}"/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
 	local EXTRA_CFLAGS=""
 	local MARCH=rv${BASE_ISA_XLEN}imafdc
@@ -381,25 +398,21 @@ function build_dropbear () {
 		# Musl doesn't support 32bit support for now
 		# fallback to using glibc-based toolchain (will result larger binaries)
 		TARGET_TUPLE=riscv64-unknown-linux-gnu
-		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+		TC_INSTALL_DIR="${BINDIR}"/riscv-glibc-toolchain
 	fi
 
-	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
+	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
+		die "Toolchain not present, did you run bootstrap ?" ${E_NOTC}
 	fi
 
 	pr_inf "Checking out Dropbear sources..."
 	get_git_sources
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	pr_inf "Configuring Dropbear..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
@@ -408,34 +421,32 @@ function build_dropbear () {
 	LDFLAGS="${EXTRA_CFLAGS} -Wl,--gc-sections" \
 	./configure --enable-static --disable-zlib --disable-wtmp \
 		    --disable-wtmpx --disable-lastlog --disable-harden \
-		    --prefix=${INSTALL_DIR} \
+		    --prefix="${INSTALL_DIR}" \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
 
 	pr_inf "Building Dropbear..."
 	make -j${NUM_JOBS} PROGRAMS="dropbear dbclient scp" MULTI=1 \
 							 &>> ${LOGFILE}
-	if [[ ! -f ${SOURCES_DIR}/dropbearmulti ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}"
-		return -1;
+	if [[ ! -f "${SOURCES_DIR}"/dropbearmulti ]]; then
+		die "\tBuild failed, check out ${LOGFILE}" ${E_BUILD}
 	fi
-	cp ${SOURCES_DIR}/dropbearmulti ${INSTALL_DIR}/bin/
-	cd ${INSTALL_DIR}/bin
+	cp "${SOURCES_DIR}"/dropbearmulti "${INSTALL_DIR}"/bin/
+	cd "${INSTALL_DIR}"/bin
 	${TARGET_TUPLE}-strip -s dropbearmulti
 	ln -s dropbearmulti dropbear
 	ln -s dropbearmulti ssh
 	ln -s dropbearmulti scp
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function build_iperf () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/iperf.log
-	local SOURCES_DIR=${SOURCES}/iperf
+	local SOURCES_DIR="${SOURCES}"/iperf
 	local GITURL=https://github.com/esnet/iperf.git
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-	local TC_INSTALL_DIR=${BINDIR}/riscv-musl${BASE_ISA_XLEN}-toolchain
+	local TC_INSTALL_DIR="${BINDIR}"/riscv-musl${BASE_ISA_XLEN}-toolchain
 	local TARGET_TUPLE=riscv${BASE_ISA_XLEN}-unknown-linux-musl
 	local EXTRA_CFLAGS=""
 	local MARCH=rv${BASE_ISA_XLEN}imafdc
@@ -448,45 +459,40 @@ function build_iperf () {
 		# Musl doesn't support 32bit support for now
 		# fallback to using glibc-based toolchain (will result larger binaries)
 		TARGET_TUPLE=riscv64-unknown-linux-gnu
-		TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+		TC_INSTALL_DIR="${BINDIR}"/riscv-glibc-toolchain
 	fi
 
-	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
+	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
+		die "Toolchain not present, did you run bootstrap ?" ${E_NOTC}
 	fi
 
 	pr_inf "Checking out iperf3 sources..."
 	get_git_sources
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	pr_inf "Configuring iperf3..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
 	CFLAGS="${EXTRA_CFLAGS} -ffunction-sections -fdata-sections" \
 	LDFLAGS="${EXTRA_CFLAGS} -Wl,--gc-sections" \
 	./configure --enable-static-bin --without-sctp --with-openssl=no \
-		    --prefix=${INSTALL_DIR} \
+		    --prefix="${INSTALL_DIR}" \
 		    --host=${TARGET_TUPLE} &>> ${LOGFILE}
 
 	pr_inf "Building iperf3..."
 	make -j${NUM_JOBS} &>> ${LOGFILE}
-	if [[ ! -f ${SOURCES_DIR}/src/iperf3 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}"
-		return -1;
+	if [[ ! -f "${SOURCES_DIR}"/src/iperf3 ]]; then
+		die "\tBuild failed, check out ${LOGFILE}" ${E_BUILD}
 	fi
-	cp ${SOURCES_DIR}/src/iperf3 ${INSTALL_DIR}/bin/
-	cd ${INSTALL_DIR}/bin
+	cp "${SOURCES_DIR}"/src/iperf3 "${INSTALL_DIR}"/bin/
+	cd "${INSTALL_DIR}"/bin
 	${TARGET_TUPLE}-strip -s iperf3
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 
@@ -495,24 +501,21 @@ function build_iperf () {
 ######################
 
 function build_toolchain () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/toolchain.log
-	local SOURCES_DIR=${SOURCES}/riscv-toolchains
+	local SOURCES_DIR="${SOURCES}"/riscv-toolchains
 	local GITURL=${RVGTOOLCHAIN_GITURL}
-	local TC_TYPE="${1}"
-	local INSTALL_DIR=${BINDIR}/riscv-${TC_TYPE}-toolchain
+	local TC_TYPE=${1}
+	local INSTALL_DIR="${BINDIR}"/riscv-${TC_TYPE}-toolchain
 	local BASE_ISA_XLEN=64
 	local TC_MKTARGET=""
 	local TC_OPTS=""
 	local MARCH=""
 	local MABI=""
-	local MUSL_BRANCH=""
 	local SAVED_CLEAR_SOURCES=${CLEAR_SOURCES}
 
 	if [[ ${TC_TYPE} != "newlib" && ${TC_TYPE} != "glibc" &&
 	      ${TC_TYPE} != "musl32" && ${TC_TYPE} != "musl64" ]]; then
-		pr_err "Invalid toolchain type selected, aborting..."
-		return -1;
+		die "Invalid toolchain type selected, aborting..." ${E_INVAL}
 	fi
 
 	if [[ ${TC_TYPE} == "musl32" ]]; then
@@ -523,47 +526,31 @@ function build_toolchain () {
 
 	pr_inf "Checking out toolchain sources..."
 	GIT_CLONE_RECURSIVE=0
+	# Don't clear toolchain sources because if this gets called
+	# multiple times, it'll clear previous modules plus it
+	# takes ages to checkout toolchain sources, if the user
+	# wants to clear them up, they can do so manualy
+	CLEAR_SOURCES=0
 	get_git_sources ${RVGTOOLCHAIN_GITBRANCH} ${RVGTOOLCHAIN_GITCOMMIT}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	get_git_submodule binutils
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	get_git_submodule gcc
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
 	get_git_submodule gdb
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
-
 
 	if [[ ${TC_TYPE} == "glibc" ]]; then
 		get_git_submodule glibc
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
 	fi
 
 	if [[ ${TC_TYPE} == "newlib" ]]; then
 		get_git_submodule newlib
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
 	fi
 
 	if [[ ${TC_TYPE} == "musl64" || ${TC_TYPE} == "musl32" ]]; then
 		get_git_submodule musl
-		if [[ $? != 0 ]]; then
-			return $?;
-		fi
 	fi
+	CLEAR_SOURCES=${SAVED_CLEAR_SOURCES}
 	GIT_CLONE_RECURSIVE=1
 
 	# Use medany code model by default
@@ -592,34 +579,31 @@ function build_toolchain () {
 	fi
 
 	pr_inf "Configuring toolchain sources for ${TC_TYPE}..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
-	./configure --prefix=${INSTALL_DIR} ${TC_OPTS} &>> ${LOGFILE}
+	./configure --prefix="${INSTALL_DIR}" ${TC_OPTS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tConfig failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tConfig failed, check out ${LOGFILE}..." ${E_CONFIG}
 	fi
 
-	rm -rf ${INSTALL_DIR} &>> ${LOGFILE}
+	rm -rf "${INSTALL_DIR}" &>> ${LOGFILE}
 
 	pr_inf "Building ${TC_TYPE}-based toolchain..."
 	make -j${NUM_JOBS} ${TC_MKTARGET} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 	fi
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function build_qemu () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/qemu.log
-	local SOURCES_DIR=${SOURCES}/riscv-qemu
+	local SOURCES_DIR="${SOURCES}"/riscv-qemu
 	local GITURL=${QEMU_GITURL}
-	local INSTALL_DIR=${BINDIR}/riscv-qemu
+	local INSTALL_DIR="${BINDIR}"/riscv-qemu
 	local TARGET_LIST_SYSTEM="riscv64-softmmu,riscv32-softmmu"
 	local TARGET_LIST_USER="riscv64-linux-user,riscv32-linux-user"
 	local TARGET_LIST=${TARGET_LIST_SYSTEM},${TARGET_LIST_USER}
@@ -629,31 +613,26 @@ function build_qemu () {
 	pr_inf "Checking out QEMU sources..."
 	GIT_CLONE_RECURSIVE=0
 	get_git_sources ${QEMU_GITBRANCH}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 	GIT_CLONE_RECURSIVE=1
 
 	pr_inf "Configuring qemu sources..."
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	./configure --target-list=${TARGET_LIST} --disable-docs \
-		    --prefix=${INSTALL_DIR} &>> ${LOGFILE}
+		    --prefix="${INSTALL_DIR}" &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tConfig failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tConfig failed, check out ${LOGFILE}..." ${E_CONFIG}
 	fi
 
 	pr_inf "Building riscv-32/riscv-64 QEMU..."
 	make -j${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 	fi
 	make install &>> ${LOGFILE}
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 ###################
@@ -661,16 +640,15 @@ function build_qemu () {
 ###################
 
 function build_linux () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rvlinux.log
-	local SOURCES_DIR=${SOURCES}/riscv-linux
+	local SOURCES_DIR="${SOURCES}"/riscv-linux
 	local GITURL=${LINUX_KERNEL_GITURL}
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
-	local CONFIG_DIR=${TARGET_PATH}/configs/
-	local ROOTFS_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs/
-	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/riscv-linux/
+	local CONFIG_DIR="${TARGET_PATH}"/configs/
+	local ROOTFS_INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs/
+	local TC_INSTALL_DIR="${BINDIR}"/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
-	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 
 	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
 		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA} with built-in initramfs"
@@ -678,23 +656,19 @@ function build_linux () {
 		pr_ann "RISC-V Linux kernel for ${TARGET}/${BASE_ISA}"
 	fi
 
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
+	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
+		die "Toolchain not present, did you run bootstrap ?" ${E_NOTC}
 	fi
 
-	if [[ -d ${INSTALL_DIR} ]]; then
-		rm -rf ${INSTALL_DIR}
+	if [[ -d "${INSTALL_DIR}" ]]; then
+		rm -rf "${INSTALL_DIR}"
 	fi
-	mkdir -p ${INSTALL_DIR} &>> ${LOGFILE}
+	mkdir -p "${INSTALL_DIR}" &>> ${LOGFILE}
 
 	pr_inf "Checking out Linux sources..."
 	get_git_sources ${LINUX_KERNEL_GITBRANCH}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	pr_inf "Preparing kernel sources..."
 	apply_patches "kernel"
 
@@ -702,9 +676,9 @@ function build_linux () {
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 
-	if [[ -f ${CONFIG_DIR}/linux ]]; then
+	if [[ -f "${CONFIG_DIR}"/linux ]]; then
 		pr_dbg "Using provided config file"
-		cp ${CONFIG_DIR}/linux ./.config
+		cp "${CONFIG_DIR}"/linux ./.config
 		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
 		make olddefconfig &>> ${LOGFILE}
 	else
@@ -713,8 +687,7 @@ function build_linux () {
 	fi
 
 	if [[ $? != 0 ]]; then
-		pr_err "\tConfig failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tConfig failed, check out ${LOGFILE}..." ${E_CONFIG}
 	fi
 
 	# Switch to 32bit configuration, olddefconfig
@@ -729,19 +702,17 @@ function build_linux () {
 	ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
 	make -j${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 	fi
 
 	pr_inf "Copying kernel image and modules..."
-	cp vmlinux ${INSTALL_DIR}/
-	cp arch/riscv/boot/Image ${INSTALL_DIR}/
-	cp arch/riscv/boot/Image.gz ${INSTALL_DIR}/
-	INSTALL_MOD_PATH=${INSTALL_DIR} ARCH=riscv \
+	cp vmlinux "${INSTALL_DIR}"/
+	cp arch/riscv/boot/Image "${INSTALL_DIR}"/
+	cp arch/riscv/boot/Image.gz "${INSTALL_DIR}"/
+	INSTALL_MOD_PATH="${INSTALL_DIR}" ARCH=riscv \
 	make modules_install &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tCopy failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tCopy failed, check out ${LOGFILE}..." ${E_INSTALL}
 	fi
 
 	if [[ ${KERNEL_EMBED_INITRAMFS} == 1 ]]; then
@@ -749,6 +720,7 @@ function build_linux () {
 		INITRAMFS_SKIP_IMAGE=1
 		build_rootfs
 		pr_inf "Re-building kernel image..."
+		cd "${SOURCES_DIR}"
 		echo "CONFIG_INITRAMFS_SOURCE=\"${ROOTFS_INSTALL_DIR}\"" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION_XZ=y" >> .config
 		echo "CONFIG_INITRAMFS_COMPRESSION=\".xz\"" >> .config
@@ -761,52 +733,47 @@ function build_linux () {
 		ARCH=riscv CROSS_COMPILE=${CC_PREFIX} \
 		-j${NUM_JOBS} &>> ${LOGFILE}
 		if [[ $? != 0 ]]; then
-			pr_err "\tBuild failed, check out ${LOGFILE}..."
-			return -1;
+			die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 		fi
-		cp vmlinux ${INSTALL_DIR}/
-		cp arch/riscv/boot/Image ${INSTALL_DIR}/
-		cp arch/riscv/boot/Image.gz ${INSTALL_DIR}/
+		cp vmlinux "${INSTALL_DIR}"/
+		cp arch/riscv/boot/Image "${INSTALL_DIR}"/
+		cp arch/riscv/boot/Image.gz "${INSTALL_DIR}"/
 		KERNEL_EMBED_INITRAMFS=0
 	fi
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function build_osbi () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/osbi.log
-	local SOURCES_DIR=${SOURCES}/riscv-opensbi
+	local SOURCES_DIR="${SOURCES}"/riscv-opensbi
 	local GITURL=${OSBI_GITURL}
-	local BUILD_DIR=${SOURCES_DIR}/build
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-opensbi/
-	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux
+	local BUILD_DIR="${SOURCES_DIR}"/build
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/riscv-opensbi/
+	local LINUX_INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/riscv-linux
 	local OSBI_PAYLOAD=""
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
-	local TC_INSTALL_DIR=${BINDIR}/riscv-glibc-toolchain
+	local TC_INSTALL_DIR="${BINDIR}"/riscv-glibc-toolchain
 	local CC_PREFIX=riscv64-unknown-linux-gnu-
 	local OSBI_MAKE_PARAMS=""
 
-	PATH=${TC_INSTALL_DIR}/bin:${PATH}
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 
 	pr_ann "OpenSBI for ${TARGET}/${BASE_ISA}"
 
-	if [[ ! -d ${TC_INSTALL_DIR} ]]; then
-		pr_err "Toolchain not present, did you run bootstrap ?"
-		return -1;
+	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
+		die "Toolchain not present, did you run bootstrap ?" ${E_NOTC}
 	fi
 
 	if [[ ${OSBI_PLATFORM} == "" ]]; then
-		pr_err "Platform not specified/supported"
-		return -2;
+		die "Platform not specified/supported" ${E_INVAL}
 	fi
 
 	if [[ ${OSBI_WITH_PAYLOAD} == 1 ]]; then
-		if [[ ! -f ${LINUX_INSTALL_DIR}/Image ]]; then
-			pr_err "\tLinux kernel not built"
-			return -2;
+		if [[ ! -f "${LINUX_INSTALL_DIR}"/Image ]]; then
+			die "\tLinux kernel not built" ${E_NOKERNEL}
 		fi
-		OSBI_PAYLOAD=${LINUX_INSTALL_DIR}/Image
+		OSBI_PAYLOAD="${LINUX_INSTALL_DIR}"/Image
 		OSBI_MAKE_PARAMS="FW_PAYLOAD=y FW_PAYLOAD_PATH=${OSBI_PAYLOAD}"
 		if [[ ${FDT_ADDR} != 0x0 ]]; then
 			OSBI_MAKE_PARAMS="${OSBI_MAKE_PARAMS} FW_PAYLOAD_FDT_ADDR=${FDT_ADDR}"
@@ -821,11 +788,8 @@ function build_osbi () {
 
 	pr_inf "Checking out OpenSBI sources..."
 	get_git_sources ${OSBI_GITBRANCH}
-	if [[ $? != 0 ]]; then
-		return $?;
-	fi
 
-	cd ${SOURCES_DIR}
+	cd "${SOURCES_DIR}"
 	make distclean &>> ${LOGFILE}
 	pr_inf "Preparing OpenSBI sources..."
 	apply_patches "osbi"
@@ -835,66 +799,63 @@ function build_osbi () {
 	make PLATFORM=${OSBI_PLATFORM} ${OSBI_MAKE_PARAMS} \
 	-j${NUM_JOBS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
-		pr_err "\tBuild failed, check out ${LOGFILE}..."
-		return -1;
+		die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 	fi
 
-	if [[ -d ${INSTALL_DIR} ]]; then
-		rm -rf ${INSTALL_DIR}
+	if [[ -d "${INSTALL_DIR}" ]]; then
+		rm -rf "${INSTALL_DIR}"
 	fi
 
-	mkdir -p ${INSTALL_DIR}
+	mkdir -p "${INSTALL_DIR}"
 
-	mv ${BUILD_DIR}/platform/${OSBI_PLATFORM}/firmware/*.elf ${INSTALL_DIR}
-	mv ${BUILD_DIR}/platform/${OSBI_PLATFORM}/firmware/*.bin ${INSTALL_DIR}
+	mv "${BUILD_DIR}"/platform/${OSBI_PLATFORM}/firmware/*.elf "${INSTALL_DIR}"
+	mv "${BUILD_DIR}"/platform/${OSBI_PLATFORM}/firmware/*.bin "${INSTALL_DIR}"
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function build_rootfs () {
-	local SAVED_PWD=${PWD}
 	local LOGFILE=${TMP_DIR}/rootfs.log
-	local INSTALL_DIR=${WORKDIR}/${BASE_ISA}/rootfs
-	local LINUX_INSTALL_DIR=${WORKDIR}/${BASE_ISA}/riscv-linux/
+	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
+	local LINUX_INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/riscv-linux/
 
 	# Don't print the title when called by build_linux
 	if [[ ${KERNEL_EMBED_INITRAMFS} == 0 ]]; then
 		pr_ann "Minimal RootFS for ${TARGET}/${BASE_ISA}"
 	fi
 
-	if [[ -d ${INSTALL_DIR} ]]; then
-		rm -rf ${INSTALL_DIR}
+	if [[ -d "${INSTALL_DIR}" ]]; then
+		rm -rf "${INSTALL_DIR}"
 	fi
-	mkdir -p ${INSTALL_DIR}/{dev,proc,sys} &>> ${LOGFILE}
-	mkdir -p ${INSTALL_DIR}/{root,etc,var/run,/lib/firmware} &>> ${LOGFILE}
+	mkdir -p "${INSTALL_DIR}"/{dev,proc,sys} &>> ${LOGFILE}
+	mkdir -p "${INSTALL_DIR}"/{root,etc,var/run,/lib/firmware} &>> ${LOGFILE}
 
 	pr_inf "Installing kernel modules..."
-	if [[ ! -f ${LINUX_INSTALL_DIR}/vmlinux ]]; then
-		pr_err "Please build kernel first"
-		return -1;
+	if [[ ! -f "${LINUX_INSTALL_DIR}"/vmlinux ]]; then
+		die "Please build kernel first" ${E_NOKERNEL}
 	fi
 
-	cp -p -r ${LINUX_INSTALL_DIR}/lib ${INSTALL_DIR}/
+	cp -p -r "${LINUX_INSTALL_DIR}"/lib "${INSTALL_DIR}"/
 
 	build_busybox
 
-	if [[ ${NO_NETWORK} == 0 ]]; then
+	if [[ "${NO_NETWORK}" == 0 ]]; then
 		build_dropbear
 		build_iperf
 	fi
 
 	pr_inf "Adding files and symlinks..."
-	cd ${INSTALL_DIR}
-	cp -p ${SCRIPT_PATH}/files/init ./sbin/initscript
-	cp -p ${SCRIPT_PATH}/files/inittab ./etc/
-	cp -p ${SCRIPT_PATH}/files/udhcpc_handler.sh ./etc/
-	cp -p ${SCRIPT_PATH}/files/motd ./etc/
-	cp -p ${SCRIPT_PATH}/files/extra/* ./bin/ &> /dev/null
+	cd "${INSTALL_DIR}"
+	cp -p "${SCRIPT_PATH}"/files/init ./sbin/initscript
+	cp -p "${SCRIPT_PATH}"/files/inittab ./etc/
+	cp -p "${SCRIPT_PATH}"/files/udhcpc_handler.sh ./etc/
+	cp -p "${SCRIPT_PATH}"/files/motd ./etc/
+	cp -p "${SCRIPT_PATH}"/files/extra/* ./bin/ &> /dev/null
 	fakeroot -s ${TMP_DIR}/frstate mknod -m 622 dev/console c 5 1
 	ln -s ./bin/busybox ./init
 
 	if [[ ${INITRAMFS_SKIP_IMAGE} == 1 ]]; then
-		cd ${SAVED_PWD}
+		cd "${SAVED_PWD}"
 		INITRAMFS_SKIP_IMAGE=0
 		return 0;
 	fi
@@ -905,44 +866,40 @@ function build_rootfs () {
 	cd ${TMP_DIR}
 	xz -e -T0 --check=crc32 --lzma2=dict=32MiB \
 	   initramfs.cpio &>> ${LOGFILE}
-	rm -rf ${INSTALL_DIR}/*
-	mv ${TMP_DIR}/initramfs.cpio.xz ${INSTALL_DIR}/initramfs.img
+	rm -rf "${INSTALL_DIR}"/*
+	mv ${TMP_DIR}/initramfs.cpio.xz "${INSTALL_DIR}"/initramfs.img
 
-	cd ${SAVED_PWD}
+	cd "${SAVED_PWD}"
 }
 
 function bootstrap () {
 	if [[ ${TARGET} != "" ]]; then
 		target_bootstrap
 	else
-		if build_toolchain newlib &&
-		   build_toolchain glibc &&
-#		   build_toolchain musl32 &&
-		   build_toolchain musl64 &&
-		   build_qemu ; then
-			return 0;
-		else
-			return -1;
-		fi
+		build_toolchain newlib
+		build_toolchain glibc
+		#build_toolchain musl32
+		build_toolchain musl64
+		build_qemu
 	fi
 }
 
 function setup_env () {
-	local TC_NEWLIB_PATH=${BINDIR}/riscv-newlib-toolchain/bin
-	local TC_GLIBC_PATH=${BINDIR}/riscv-glibc-toolchain/bin
-	local TC_MUSL32_PATH=${BINDIR}/riscv-musl32-toolchain/bin
-	local TC_MUSL64_PATH=${BINDIR}/riscv-musl64-toolchain/bin
-	local TC_MUSL_PATHS=${TC_MUSL32_PATH}:${TC_MUSL64_PATH}
-	local ALL_TC_PATHS=${TC_NEWLIB_PATH}:${TC_GLIBC_PATH}:${TC_MUSL_PATHS}
+	local TC_NEWLIB_PATH="${BINDIR}"/riscv-newlib-toolchain/bin
+	local TC_GLIBC_PATH="${BINDIR}"/riscv-glibc-toolchain/bin
+	#local TC_MUSL32_PATH="${BINDIR}"/riscv-musl32-toolchain/bin
+	local TC_MUSL64_PATH="${BINDIR}"/riscv-musl64-toolchain/bin
+	#local TC_MUSL_PATHS="${TC_MUSL32_PATH}":"${TC_MUSL64_PATH}"
+	local ALL_TC_PATHS="${TC_NEWLIB_PATH}":"${TC_GLIBC_PATH}":"${TC_MUSL64_PATH}"
 	local QEMU_PATH=${BINDIR}/riscv-qemu/bin
-	export PATH=${ALL_TC_PATHS}:${QEMU_PATH}:${PATH}
+	export PATH="${ALL_TC_PATHS}":"${QEMU_PATH}":"${PATH}"
 }
 
 function cleanup () {
 	pr_inf "Cleaning up..."
-	rm -rf ${BINDIR} &> /dev/null
+	rm -rf "${BINDIR}" &> /dev/null
 	if [[ ${CLEAR_SOURCES} == 1 ]]; then
-		rm -rf ${SOURCES} &> /dev/null
+		rm -rf "${SOURCES}" &> /dev/null
 	fi
 }
 
@@ -957,15 +914,17 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
 	return 0
 fi
 
-pr_ann "Yet another RISC-V tool v0.5"
-env_check $@
+pr_ann "Yet another RISC-V tool v0.8"
+env_check "$@"
 
-mkdir -p ${SOURCES} &> /dev/null
-mkdir -p ${WORKDIR} &> /dev/null
+mkdir -p "${SOURCES}" &> /dev/null
+mkdir -p "${WORKDIR}" &> /dev/null
 
 # Cleanup previous tmpdirs
 rm -rf /tmp/${SCRIPT_NAME}_*
 mkdir -p ${TMP_DIR} &> /dev/null
+
+trap interrupt SIGINT
 
 if [[ ${TARGET} !=  "" ]];then
 	shift 1
@@ -973,8 +932,4 @@ fi
 
 $@
 
-if [[ ${KEEP_LOGS} == 1 ]];then
-	pr_inf "Checkout logs at ${TMP_DIR}"
-else
-	rm -rf ${TMP_DIR} &> /dev/null
-fi
+exit 0
