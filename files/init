@@ -41,14 +41,34 @@ ip link set lo up &> /dev/null
 ip addr add 127.0.0.1 dev lo &> /dev/null
 ip route add 127.0.0.0/255.0.0.0 dev lo &> /dev/null
 
-# Print a greeting
-cat /etc/motd > /dev/console
+# Grab some parameters from kernel's cmdline
+SINGLE=0
+CMDLINE=$(xargs -n1 -a /proc/cmdline)
+for arg in ${CMDLINE}; do
+	case "${arg}" in
+		systemd.hostname=*)
+			hostname "${arg#systemd.hostname=}"
+			;;
+		rescue)
+			SINGLE=1
+			;;
+	esac
+done
+
+# Update motd
+echo "$(uname -s -v -r -p -m)" >> /etc/motd
 
 # Disable kernel log output on console
 dmesg -n1
 
-echo -e "\t\tWelcome to RISC-V !" > /dev/console
-echo "$(uname -s -v -r -p -m)" > /dev/console
+# Print a greeting
+echo -e "\n\n\t\tWelcome to RISC-V !" > /dev/console
+echo -e "\t\t--===============--" > /dev/console
+if [[ ${SINGLE} -eq 0 ]]; then
+	echo -e "Use root/riscv to login" > /dev/console
+else
+	cat /etc/motd > /dev/console
+fi
 
 # Initialize networking and start DHCP and
 # the ssh server if available
@@ -68,10 +88,18 @@ if [[ $? == 0 ]]; then
 	ln -s /bin/dropbearmulti /usr/bin/dbclient
 	ntpd &
 	echo "You may login remotely through ssh over network or" > /dev/console
-	echo "your host's port 2222 (in case of QEMU) using root/riscv" > /dev/console
+	if [[ ${SINGLE} -eq 0 ]]; then
+		echo "your host's port 2222 (in case of QEMU)" > /dev/console
+	else
+		echo "your host's port 2222 (in case of QEMU) using root/riscv" > /dev/console
+	fi
 fi
 
 # Get console
-exec setsid cttyhack bash -c "while true; do /bin/bash; done"
-
-#exec /bin/bash
+export PS1="${USER}@\$(hostname): \${PWD} $ "
+if [[ ${SINGLE} -eq 0 ]]; then
+	touch .hushlogin
+	exec setsid cttyhack bash -c "while true; do /bin/login -p; done"
+else
+	exec setsid cttyhack bash -c "while true; do /bin/bash; done"
+fi

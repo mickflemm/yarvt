@@ -27,6 +27,9 @@ case "${1}" in
 			echo "server ${1}" >> ${NTP_CONF}
 		done
 		echo "server time.google.com" >> ${NTP_CONF}
+		if [[ -n "${hostname}" ]]; then
+			hostname "${hostname}"
+		fi
 		;;
 esac
 

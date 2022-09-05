@@ -65,7 +65,7 @@ function run_linux () {
 	local BIOS=${OSBI_INSTALL_DIR}/fw_jump.elf
 
 	${QEMU} -nographic -machine virt -smp 2 -m 1G -s \
-		-netdev user,id=unet,hostfwd=tcp::2222-:22 \
+		-netdev user,id=unet,hostfwd=tcp::2222-:22,hostname=riscv \
 		-device virtio-net-device,netdev=unet \
 		-net user \
 		-object rng-random,filename=/dev/urandom,id=rng0 \
