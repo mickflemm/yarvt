@@ -470,7 +470,7 @@ function build_iperf () {
 	fi
 
 	pr_inf "Checking out iperf3 sources..."
-	get_git_sources
+	get_git_sources "3.11"
 
 	pr_inf "Configuring iperf3..."
 	cd "${SOURCES_DIR}"
