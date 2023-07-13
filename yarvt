@@ -52,18 +52,18 @@ LINUX_KERNEL_GITPATH=pub/scm/linux/kernel/git/riscv/linux.git
 LINUX_KERNEL_GITURL=https://git.kernel.org/${LINUX_KERNEL_GITPATH}
 LINUX_KERNEL_GITBRANCH="fixes"
 
-OSBI_GITURL=https://github.com/riscv/opensbi.git
+OSBI_GITURL=https://github.com/riscv-software-src/opensbi.git
 OSBI_GITBRANCH=""
 
 QEMU_GITURL=https://gitlab.com/qemu-project/qemu.git
-QEMU_GITBRANCH="v7.0.0"
+QEMU_GITBRANCH="v8.0.0"
 
 BBOX_GITURL=https://git.busybox.net/busybox.git
 BBOX_GITBRANCH="1_35_stable"
 
 RVGTOOLCHAIN_GITURL=https://github.com/riscv-collab/riscv-gnu-toolchain.git
-RVGTOOLCHAIN_GITBRANCH="master"
-RVGTOOLCHAIN_GITCOMMIT="c39061968972ac2e4a10844aa54b90c8fb94125e"
+RVGTOOLCHAIN_GITBRANCH="2023.07.07"
+RVGTOOLCHAIN_GITCOMMIT=""
 
 ##################
 # CONSOLE OUTPUT #
@@ -580,8 +580,6 @@ function build_toolchain () {
 
 	pr_inf "Configuring toolchain sources for ${TC_TYPE}..."
 	cd "${SOURCES_DIR}"
-	make clean &>> ${LOGFILE}
-	make distclean &>> ${LOGFILE}
 	autoreconf -ivf &>> ${LOGFILE}
 	./configure --prefix="${INSTALL_DIR}" ${TC_OPTS} &>> ${LOGFILE}
 	if [[ $? != 0 ]]; then
@@ -595,6 +593,9 @@ function build_toolchain () {
 	if [[ $? != 0 ]]; then
 		die "\tBuild failed, check out ${LOGFILE}..." ${E_BUILD}
 	fi
+
+	make clean &>> ${LOGFILE}
+	make distclean &>> ${LOGFILE}
 
 	cd "${SAVED_PWD}"
 }
