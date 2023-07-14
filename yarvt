@@ -14,6 +14,7 @@ TMP_DIR=/tmp/"${SCRIPT_NAME}"_$$
 NUM_JOBS=$(nproc)
 : ${DEBUG:=1}
 : ${CLEAR_SOURCES:=0}
+: ${REUSE_SOURCES:=0}
 if [[ ${DEBUG} == 1 ]]; then
 	KEEP_LOGS=1
 else
@@ -185,7 +186,7 @@ function get_git_sources() {
 			pr_dbg "Cleaning up ${SOURCES_DIR}..."
 			rm -rf "${SOURCES_DIR}" &>> ${LOGFILE}
 			git_clone "${1}" "${2}"
-		else
+		elif [[ ${REUSE_SOURCES} != 1 ]]; then
 			if [[ "${2}" != "" ]]; then
 				cd "${SOURCES_DIR}"
 				git_cleanup snapshot
@@ -236,6 +237,10 @@ function apply_patches () {
 	local IFS=$'\n'
 	local PATCHLOGFILE=${TMP_DIR}/patch.log
 	local PATCHLIST=$(ls "${TARGET_PATH}"/patches/"${1}"*.patch 2> /dev/null)
+
+	if [[ ${REUSE_SOURCES} == 1 ]]; then
+		return
+	fi
 
 	for i in ${PATCHLIST}; do
 		pr_dbg "Applying ${i}..."
