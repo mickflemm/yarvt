@@ -381,6 +381,28 @@ function get_tc_tuple() {
 	return 0
 }
 
+function deduplicate_files() {
+	local DUPLICATES=()
+	local DIR=${1}
+	local OLDIFS=${IFS}
+	local LINK_CHECK=""
+
+	readarray -t DUPLICATES < <(for i in `find ${DIR} -type f ! -empty`; do sha1sum ${i}; done | sort | uniq -w 40 --all-repeated=separate)
+
+	for ((i=1; i < ${#DUPLICATES[@]}; i++ )); do
+		if [[ ${DUPLICATES[$i]} == "" ]]; then
+			continue
+		elif [[ ${DUPLICATES[$i-1]} = "" ]]; then
+			continue
+		else
+			LINK_CHECK=$(ls -li "${DUPLICATES[$i]:42}" "${DUPLICATES[$i-1]:42}" |awk '{print $1}' | uniq | wc -l)
+			if [[ ${LINK_CHECK} != "1" ]]; then
+				ln -f "${DUPLICATES[$i-1]:42}" "${DUPLICATES[$i]:42}"
+			fi
+		fi
+	done
+}
+
 ##################
 # ROOTFS HELPERS #
 ##################
@@ -648,6 +670,7 @@ function build_toolchain () {
 	make distclean &>> ${LOGFILE}
 	rm -rf ${INSTALL_DIR}/share/info &>> ${LOGFILE}
 	rm -rf ${INSTALL_DIR}/share/man &>> ${LOGFILE}
+	deduplicate_files ${INSTALL_DIR} &>> ${LOGFILE}
 
 	cd "${SAVED_PWD}"
 }
@@ -659,8 +682,6 @@ function fetch_toolchain() {
 	local INSTALL_DIR=""
 	local DOWNLOAD_URL=${RVGTOOLCHAIN_RELURL}/${RVGTOOLCHAIN_GITBRANCH}
 	local FILENAME=""
-
-	pr_ann "RISC-V ${TC_TYPE}${BASE_ISA_XLEN} toolchain"
 
 	if [[ ${TC_TYPE} == "newlib" ]]; then
 		FILENAME=riscv${BASE_ISA_XLEN}-elf-ubuntu-20.04-gcc-nightly-${RVGTOOLCHAIN_GITBRANCH}-nightly.tar.gz
@@ -696,6 +717,7 @@ function fetch_toolchain() {
 	rm -rf ${INSTALL_DIR}/share/man &>> ${LOGFILE}
 	rm -rf ${INSTALL_DIR}/share/qemu &>> ${LOGFILE}
 	rm ${INSTALL_DIR}/include/qemu-plugin.h &>> ${LOGFILE}
+	deduplicate_files ${INSTALL_DIR} &>> ${LOGFILE}
 
 	cd "${SAVED_PWD}"
 }
@@ -994,12 +1016,13 @@ function bootstrap () {
 }
 
 function bootstrap_fast () {
-	fetch_toolchain newlib 32
-	fetch_toolchain newlib 64
-	fetch_toolchain glibc 32
-	fetch_toolchain glibc 64
-	fetch_toolchain musl 64
 	build_qemu
+	pr_ann "Fetching toolchains from riscv-gnu-toolchain repository"
+	fetch_toolchain newlib 32 &
+	fetch_toolchain newlib 64 &
+	fetch_toolchain glibc 32 &
+	fetch_toolchain glibc 64 &
+	fetch_toolchain musl 64
 }
 
 function setup_env () {
