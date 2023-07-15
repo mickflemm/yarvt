@@ -475,13 +475,31 @@ function build_dropbear () {
 	local MARCH=rv${BASE_ISA_XLEN}imafdc
 	local MABI=""
 
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
+
+	# There is already a binary there, if it's for the same BASE_ISA_XLEN
+	# as the image we are building just re-use it instead of recompiling it
+	# and getting the same binary anyway.
+	if [[ -f "${SOURCES_DIR}"/dropbearmulti ]]; then
+			${TARGET_TUPLE}-objdump -a "${SOURCES_DIR}"/dropbearmulti | grep "file format" | grep elf${BASE_ISA_XLEN} &>> ${LOGFILE}
+			if [[ $? == 0 ]]; then
+				pr_inf "Installing Dropbear..."
+				cp "${SOURCES_DIR}"/dropbearmulti "${INSTALL_DIR}"/bin/
+				cd "${INSTALL_DIR}"/bin
+				ln -s dropbearmulti dropbear
+				ln -s dropbearmulti ssh
+				ln -s dropbearmulti scp
+				cd "${SAVED_PWD}"
+				return
+			fi
+	fi
+
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
 		MABI=lp64d
 	else
 		MABI=ilp32d
 	fi
 
-	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
 	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
@@ -510,9 +528,9 @@ function build_dropbear () {
 	if [[ ! -f "${SOURCES_DIR}"/dropbearmulti ]]; then
 		die "\tBuild failed, check out ${LOGFILE}" ${E_BUILD}
 	fi
+	${TARGET_TUPLE}-strip -s "${SOURCES_DIR}"/dropbearmulti &>> ${LOGFILE}
 	cp "${SOURCES_DIR}"/dropbearmulti "${INSTALL_DIR}"/bin/
 	cd "${INSTALL_DIR}"/bin
-	${TARGET_TUPLE}-strip -s dropbearmulti
 	ln -s dropbearmulti dropbear
 	ln -s dropbearmulti ssh
 	ln -s dropbearmulti scp
@@ -532,13 +550,26 @@ function build_iperf () {
 	local MARCH=rv${BASE_ISA_XLEN}imafdc
 	local MABI=""
 
+	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
+
+	# There is already a binary there, if it's for the same BASE_ISA_XLEN
+	# as the image we are building just re-use it instead of recompiling it
+	# and getting the same binary anyway.
+	if [[ -f "${SOURCES_DIR}"/src/iperf3 ]]; then
+			${TARGET_TUPLE}-objdump -a "${SOURCES_DIR}"/src/iperf3 | grep "file format" | grep elf${BASE_ISA_XLEN} &>> ${LOGFILE}
+			if [[ $? == 0 ]]; then
+				pr_inf "Installing iperf3..."
+				cp "${SOURCES_DIR}"/src/iperf3 "${INSTALL_DIR}"/bin/
+				return
+			fi
+	fi
+
 	if [[ ${BASE_ISA_XLEN} == 64 ]]; then
 		MABI=lp64d
 	else
 		MABI=ilp32d
 	fi
 
-	PATH="${TC_INSTALL_DIR}"/bin:"${PATH}"
 	EXTRA_CFLAGS="-Os -march=${MARCH} -mabi=${MABI} -mcmodel=medany -flto=$(nproc) -ffat-lto-objects"
 
 	if [[ ! -d "${TC_INSTALL_DIR}" ]]; then
@@ -564,9 +595,8 @@ function build_iperf () {
 	if [[ ! -f "${SOURCES_DIR}"/src/iperf3 ]]; then
 		die "\tBuild failed, check out ${LOGFILE}" ${E_BUILD}
 	fi
+	${TARGET_TUPLE}-strip -s "${SOURCES_DIR}"/src/iperf3 &>> ${LOGFILE}
 	cp "${SOURCES_DIR}"/src/iperf3 "${INSTALL_DIR}"/bin/
-	cd "${INSTALL_DIR}"/bin
-	${TARGET_TUPLE}-strip -s iperf3
 
 	cd "${SAVED_PWD}"
 }
