@@ -57,13 +57,19 @@ OSBI_GITURL=https://github.com/riscv-software-src/opensbi.git
 OSBI_GITBRANCH=""
 
 QEMU_GITURL=https://gitlab.com/qemu-project/qemu.git
-QEMU_GITBRANCH="v8.0.0"
+QEMU_GITBRANCH="stable-8.2"
 
 BBOX_GITURL=https://git.busybox.net/busybox.git
-BBOX_GITBRANCH="1_35_stable"
+BBOX_GITBRANCH="1_36_stable"
+
+DBEAR_GITURL=https://github.com/mkj/dropbear.git
+DBEAR_GITBRANCH="DROPBEAR_2022.83"
+
+IPERF3_GITURL=https://github.com/esnet/iperf.git
+IPERF3_GITBRANCH="3.16"
 
 RVGTOOLCHAIN_GITURL=https://github.com/riscv-collab/riscv-gnu-toolchain.git
-RVGTOOLCHAIN_GITBRANCH="2023.07.07"
+RVGTOOLCHAIN_GITBRANCH="2024.02.02"
 RVGTOOLCHAIN_GITCOMMIT=""
 RVGTOOLCHAIN_RELURL=https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/
 
@@ -466,7 +472,7 @@ function build_busybox () {
 function build_dropbear () {
 	local LOGFILE=${TMP_DIR}/dbear.log
 	local SOURCES_DIR="${SOURCES}"/dropbear
-	local GITURL=https://github.com/mkj/dropbear.git
+	local GITURL=${DBEAR_GITURL}
 	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=$(get_tc_path musl ${BASE_ISA_XLEN})
@@ -507,7 +513,7 @@ function build_dropbear () {
 	fi
 
 	pr_inf "Checking out Dropbear sources..."
-	get_git_sources
+	get_git_sources ${DBEAR_GITBRANCH}
 
 	pr_inf "Configuring Dropbear..."
 	cd "${SOURCES_DIR}"
@@ -541,7 +547,7 @@ function build_dropbear () {
 function build_iperf () {
 	local LOGFILE=${TMP_DIR}/iperf.log
 	local SOURCES_DIR="${SOURCES}"/iperf
-	local GITURL=https://github.com/esnet/iperf.git
+	local GITURL=${IPERF3_GITURL}
 	local INSTALL_DIR="${WORKDIR}"/${BASE_ISA}/rootfs
 	local BASE_ISA_XLEN=$(echo ${BASE_ISA} | tr -d [:alpha:])
 	local TC_INSTALL_DIR=$(get_tc_path musl ${BASE_ISA_XLEN})
@@ -577,7 +583,7 @@ function build_iperf () {
 	fi
 
 	pr_inf "Checking out iperf3 sources..."
-	get_git_sources "3.11"
+	get_git_sources ${IPERF3_GITBRANCH}
 
 	pr_inf "Configuring iperf3..."
 	cd "${SOURCES_DIR}"
