@@ -284,6 +284,7 @@ function usage () {
 	pr_inf "\thelp/usage: Print this message"
 	pr_inf "\tcleanup: Clean up environment"
 	pr_inf "\tbootstrap: (Re)Build toolchains and qemu"
+	pr_inf "\tbootstrap_fast: (Re)Fetch toolchains and rebuild qemu"
 	pr_inf "\tbuild_toolchain: (Re)Build a specific toolchain"
 	pr_wrn "\t<arg>: Toolchain type (newlib, glibc, musl32, musl64)"
 	pr_inf "\tbuild_qemu: (Re)Build RISC-V QEMU"
