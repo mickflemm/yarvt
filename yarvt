@@ -239,9 +239,9 @@ function get_git_submodule () {
 	cd "${SAVED_PWD}"
 }
 
-function apply_patches () {
+function apply_target_patches () {
 	local IFS=$'\n'
-	local PATCHLOGFILE=${TMP_DIR}/patch.log
+	local PATCHLOGFILE=${TMP_DIR}/target-patch.log
 	local PATCHLIST=$(ls "${TARGET_PATH}"/patches/"${1}"*.patch 2> /dev/null)
 
 	if [[ ${REUSE_SOURCES} == 1 ]]; then
@@ -264,6 +264,26 @@ function apply_patches () {
 			die "Patching failed, check out ${PATCHLOGFILE}" ${E_PATCH}
 		fi
 	done
+	rm "${PATCHLOGFILE}" &> /dev/null
+}
+
+function apply_yarvt_patches () {
+	local IFS=$'\n'
+	local PATCHLOGFILE=${TMP_DIR}/yarvt-patch.log
+	local PATCHLIST=$(ls "${SCRIPT_PATH}"/files/patches/"${1}"*.patch 2> /dev/null)
+
+	if [[ ${REUSE_SOURCES} == 1 ]]; then
+		return
+	fi
+
+	for i in ${PATCHLIST}; do
+		pr_dbg "Applying ${i}..."
+		patch -p1 < "${i}" &>> ${PATCHLOGFILE}
+		if [[ $? != 0 ]]; then
+			die  "Patching failed, check out ${PATCHLOGFILE}" ${E_PATCH}
+		fi
+	done
+
 	rm "${PATCHLOGFILE}" &> /dev/null
 }
 
@@ -779,9 +799,11 @@ function build_qemu () {
 	GIT_CLONE_RECURSIVE=0
 	get_git_sources ${QEMU_GITBRANCH}
 	GIT_CLONE_RECURSIVE=1
+	cd "${SOURCES_DIR}"
+	pr_inf "Preparing qemu sources..."
+	apply_yarvt_patches "qemu"
 
 	pr_inf "Configuring qemu sources..."
-	cd "${SOURCES_DIR}"
 	make clean &>> ${LOGFILE}
 	make distclean &>> ${LOGFILE}
 	./configure --target-list=${TARGET_LIST} --disable-docs \
@@ -837,7 +859,7 @@ function build_linux () {
 
 	cd "${SOURCES_DIR}"
 	pr_inf "Preparing kernel sources..."
-	apply_patches "kernel"
+	apply_target_patches "kernel"
 
 	pr_inf "Configuring kernel sources..."
 	make clean &>> ${LOGFILE}
@@ -965,7 +987,7 @@ function build_osbi () {
 	cd "${SOURCES_DIR}"
 	make distclean &>> ${LOGFILE}
 	pr_inf "Preparing OpenSBI sources..."
-	apply_patches "osbi"
+	apply_target_patches "osbi"
 
 	pr_inf "Building OpenSBI..."
 	CROSS_COMPILE=${CC_PREFIX} PLATFORM_RISCV_XLEN=${BASE_ISA_XLEN} \
